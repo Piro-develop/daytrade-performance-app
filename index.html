@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#07100d">
+  <meta name="description" content="デイトレ・スイングの売買と実現損益を管理する個人用アプリ">
+  <title>デイトレ・スイング成績管理</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div id="boot" class="boot-screen"><div class="spinner"></div><p>アプリを準備しています…</p></div>
+
+  <section id="login-screen" class="login-screen hidden" aria-labelledby="login-title">
+    <div class="login-card">
+      <div class="login-mark">T<span>J</span></div>
+      <p class="eyebrow">TRADING JOURNAL</p>
+      <h1 id="login-title">投資運用記録</h1>
+      <p>デイトレ・スイングの売買、保有株数、実現損益をスマホとPCで一元管理します。</p>
+      <button id="login-button" class="primary-button login-button" type="button">
+        <span class="google-mark">G</span>Googleアカウントでログイン
+      </button>
+      <small>取引データは、ログインしたご本人だけが閲覧できます。</small>
+      <p id="login-error" class="error-message" role="alert"></p>
+    </div>
+  </section>
+
+  <div id="app" class="app-shell hidden">
+    <aside class="sidebar">
+      <div class="monogram" aria-label="Trading Journal">T<span>J</span></div>
+      <nav aria-label="メインメニュー">
+        <button class="nav-item active" data-view="overview" type="button"><i>⌁</i><span>概要</span></button>
+        <button class="nav-item" data-view="records" type="button"><i>▤</i><span>売買記録</span></button>
+        <button class="nav-item" data-view="analytics" type="button"><i>◔</i><span>分析</span></button>
+      </nav>
+      <button class="nav-item settings-nav" data-view="settings" type="button"><i>⚙</i><span>設定</span></button>
+    </aside>
+
+    <main class="main-content">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">TRADING JOURNAL</p>
+          <h1 id="page-title">投資運用記録</h1>
+          <p id="page-subtitle" class="subtitle">デイトレ・スイングの振り返りと成績</p>
+        </div>
+        <div class="header-actions">
+          <label id="range-control" class="range-select">▣
+            <select id="range-select" aria-label="表示期間">
+              <option value="7">過去7日</option>
+              <option value="30" selected>過去30日</option>
+              <option value="90">過去90日</option>
+              <option value="all">全期間</option>
+            </select>
+          </label>
+          <button id="open-buy" class="primary-button" type="button"><b>＋</b><span>買付を記録</span></button>
+        </div>
+      </header>
+
+      <section id="overview-view" class="app-view"></section>
+      <section id="records-view" class="app-view hidden"></section>
+      <section id="analytics-view" class="app-view hidden"></section>
+      <section id="settings-view" class="app-view hidden"></section>
+    </main>
+  </div>
+
+  <div id="modal-backdrop" class="modal-backdrop hidden" role="presentation">
+    <section class="trade-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-header">
+        <div><p id="modal-kicker" class="section-kicker">NEW POSITION</p><h2 id="modal-title">買付記録を登録</h2></div>
+        <button id="close-modal" class="close-button" type="button" aria-label="閉じる">×</button>
+      </div>
+      <form id="trade-form">
+        <div class="form-grid">
+          <label>取引日<input id="trade-date" type="date" required></label>
+          <label>取引区分<select id="trade-style"><option>デイトレ</option><option>スイング</option></select></label>
+
+          <label id="security-field" class="full">銘柄
+            <span class="security-input-wrap">
+              <input id="security-query" autocomplete="off" placeholder="銘柄コードまたは銘柄名を入力">
+              <span id="security-options" class="security-options hidden" role="listbox"></span>
+            </span>
+          </label>
+          <div id="fixed-security" class="fixed-security full hidden"></div>
+          <div id="manual-fields" class="manual-fields full hidden">
+            <label>銘柄コード<input id="manual-code" maxlength="8" placeholder="例：285A"></label>
+            <label>正式銘柄名<input id="manual-name" maxlength="80" placeholder="銘柄名を入力"></label>
+          </div>
+
+          <label><span id="price-label">取得価格</span><input id="trade-price" inputmode="decimal" type="number" min="0.01" step="any" placeholder="0" required></label>
+          <label>株数<input id="trade-quantity" inputmode="numeric" type="number" min="1" step="1" placeholder="100" required><span id="quantity-helper" class="quantity-helper"></span></label>
+
+          <div id="calculation-note" class="calculation-note full"></div>
+          <p id="form-error" class="error-message full" role="alert"></p>
+          <label class="full">振り返りメモ<textarea id="trade-note" placeholder="売買の根拠・良かった点・改善点など"></textarea></label>
+        </div>
+        <div class="form-actions">
+          <button id="cancel-modal" class="secondary-button" type="button">キャンセル</button>
+          <button id="save-trade" class="primary-button" type="submit">買付を記録</button>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  <div id="toast" class="toast hidden" role="status"></div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
