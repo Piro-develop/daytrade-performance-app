@@ -161,7 +161,7 @@ function tradeCard(trade, positions) {
   const position = positions.get(trade.code);
   const result = trade.realisedProfit === null ? (position ? "保有中" : "売却済み") : yen(trade.realisedProfit);
   const resultClass = trade.realisedProfit === null ? "muted" : trade.realisedProfit >= 0 ? "positive" : "negative";
-  return `<div class="trade-row"><span class="side-badge ${trade.action === "買付" ? "buy" : "sell"}">${trade.action === "買付" ? "BUY" : "SELL"}</span><div class="trade-main"><strong>${esc(trade.code)} ${esc(trade.name)}</strong><small>${trade.date.replaceAll("-", "/")} ・ ${esc(trade.style)} ・ ${yen(trade.price, false)} × ${trade.quantity.toLocaleString()}株</small></div><div class="trade-result"><strong class="${resultClass}">${result}</strong>${trade.action === "買付" && position ? `<button class="sale-register-button" data-action="sell" data-code="${esc(trade.code)}" data-style="${esc(trade.style)}" type="button">売却記録を登録</button>` : ""}</div></div>`;
+  return `<div class="trade-row"><span class="side-badge ${trade.action === "買付" ? "buy" : "sell"}">${trade.action === "買付" ? "BUY" : "SELL"}</span><div class="trade-main"><strong>${esc(trade.code)} ${esc(trade.name)}</strong><small>${trade.date.replaceAll("-", "/")} ・ ${esc(trade.style)} ・ ${yen(trade.price, false)} × ${trade.quantity.toLocaleString()}株</small></div><div class="trade-result"><strong class="${resultClass}">${result}</strong>${trade.action === "買付" && position ? `<button class="sale-register-button" data-action="sell" data-code="${esc(trade.code)}" data-style="${esc(trade.style)}" data-date="${esc(trade.date)}" type="button">売却記録を登録</button>` : ""}</div></div>`;
 }
 
 function parseLocalDate(value) {
@@ -245,7 +245,7 @@ function renderRecords(ledger) {
     <div class="trade-table"><div class="table-head"><span>取引日</span><span>銘柄</span><span>区分</span><span>売買</span><span>約定価格</span><span>株数</span><span>実現損益</span><span>操作</span></div>${records.map((trade) => {
       const position = positions.get(trade.code);
       const tax = trade.realisedProfit === null ? "" : `<small>税引後参考 ${yen(afterTax(trade.realisedProfit))}</small>`;
-      return `<article class="table-row"><span data-label="取引日">${trade.date}</span><span data-label="銘柄"><strong>${esc(trade.code)}</strong><small>${esc(trade.name)}</small></span><span data-label="区分"><b class="style-badge">${esc(trade.style)}</b></span><span data-label="売買"><b class="${trade.action === "買付" ? "buy-text" : "sell-text"}">${trade.action}</b></span><span data-label="約定価格">${yen(trade.price,false)}</span><span data-label="株数">${trade.quantity.toLocaleString()}株</span><span data-label="実現損益" class="row-profit ${trade.realisedProfit === null ? "" : trade.realisedProfit >= 0 ? "positive" : "negative"}"><strong>${trade.realisedProfit === null ? "—" : yen(trade.realisedProfit)}</strong>${tax}</span><span data-label="操作" class="row-actions">${trade.action === "買付" && position ? `<button class="icon-button" title="売却記録を登録" data-action="sell" data-code="${esc(trade.code)}" data-style="${esc(trade.style)}">売</button>` : ""}<button class="icon-button" title="修正" data-action="edit" data-id="${esc(trade.id)}">修</button><button class="icon-button delete" title="削除" data-action="delete" data-id="${esc(trade.id)}">削</button></span></article>`;
+      return `<article class="table-row"><span data-label="取引日">${trade.date}</span><span data-label="銘柄"><strong>${esc(trade.code)}</strong><small>${esc(trade.name)}</small></span><span data-label="区分"><b class="style-badge">${esc(trade.style)}</b></span><span data-label="売買"><b class="${trade.action === "買付" ? "buy-text" : "sell-text"}">${trade.action}</b></span><span data-label="約定価格">${yen(trade.price,false)}</span><span data-label="株数">${trade.quantity.toLocaleString()}株</span><span data-label="実現損益" class="row-profit ${trade.realisedProfit === null ? "" : trade.realisedProfit >= 0 ? "positive" : "negative"}"><strong>${trade.realisedProfit === null ? "—" : yen(trade.realisedProfit)}</strong>${tax}</span><span data-label="操作" class="row-actions">${trade.action === "買付" && position ? `<button class="icon-button" title="売却記録を登録" data-action="sell" data-code="${esc(trade.code)}" data-style="${esc(trade.style)}" data-date="${esc(trade.date)}">売</button>` : ""}<button class="icon-button" title="修正" data-action="edit" data-id="${esc(trade.id)}">修</button><button class="icon-button delete" title="削除" data-action="delete" data-id="${esc(trade.id)}">削</button></span></article>`;
     }).join("") || '<div class="empty-state">該当する売買はありません</div>'}</div></div>`;
   const search = $("#record-search");
   search?.addEventListener("input", (event) => { state.recordQuery = event.target.value; renderRecords(calculateLedger(state.trades)); requestAnimationFrame(() => { const next = $("#record-search"); next?.focus(); next?.setSelectionRange(state.recordQuery.length, state.recordQuery.length); }); });
@@ -312,7 +312,7 @@ function openBuy(editTrade = null) {
   $("#modal-backdrop").classList.remove("hidden");
 }
 
-function openSell(code, style = "スイング", editTrade = null) {
+function openSell(code, style = "スイング", editTrade = null, defaultDate = null) {
   resetForm();
   const ledger = calculateLedger(state.trades);
   const position = ledger.positions.find((item) => item.code === code);
@@ -338,7 +338,10 @@ function openSell(code, style = "スイング", editTrade = null) {
     $("#trade-quantity").value = editTrade.quantity;
     $("#trade-note").value = editTrade.note ?? "";
     updateSalePreview();
-  } else $("#trade-style").value = style;
+  } else {
+    $("#trade-style").value = style;
+    if (defaultDate) $("#trade-date").value = defaultDate;
+  }
   $("#modal-backdrop").classList.remove("hidden");
 }
 
@@ -462,7 +465,7 @@ document.addEventListener("click", async (event) => {
   const action = target.dataset.action;
   if (action === "view-records") switchView("records");
   if (action === "pnl-period") { state.pnlPeriod = target.dataset.period; renderRecords(calculateLedger(state.trades)); }
-  if (action === "sell") openSell(target.dataset.code, target.dataset.style ?? "スイング");
+  if (action === "sell") openSell(target.dataset.code, target.dataset.style ?? "スイング", null, target.dataset.date ?? null);
   if (action === "choose-security") { const security = state.securities.find((item) => item.code === target.dataset.code); state.form.selected = security; state.form.manual = false; $("#security-query").value = `${security.code}　${security.name}`; $("#security-options").classList.add("hidden"); $("#manual-fields").classList.add("hidden"); }
   if (action === "manual-security") { state.form.manual = true; state.form.selected = null; $("#security-options").classList.add("hidden"); $("#manual-fields").classList.remove("hidden"); $("#manual-code").focus(); }
   if (action === "edit") { const trade = state.trades.find((item) => item.id === target.dataset.id); trade.action === "買付" ? openBuy(trade) : openSell(trade.code, trade.style, trade); }
