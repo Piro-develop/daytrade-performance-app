@@ -12,6 +12,7 @@ const firebaseConfig = {
 };
 
 const TAX_RATE = 0.20315;
+const PNL_HISTORY_START = "2026-07-01";
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -35,7 +36,8 @@ const state = {
   activeView: "overview",
   range: "30",
   recordQuery: "",
-  lossPeriod: "day",
+  pnlPeriod: "day",
+  pnlPeriodOffsets: { day: 0, week: 0, month: 0 },
   unsubscribe: null,
   form: { mode: "new", action: "買付", editId: null, selected: null, manual: false, sellContext: null }
 };
@@ -160,32 +162,68 @@ function tradeCard(trade, positions) {
   return `<div class="trade-row"><span class="side-badge ${trade.action === "買付" ? "buy" : "sell"}">${trade.action === "買付" ? "BUY" : "SELL"}</span><div class="trade-main"><strong>${esc(trade.code)} ${esc(trade.name)}</strong><small>${trade.date.replaceAll("-", "/")} ・ ${esc(trade.style)} ・ ${yen(trade.price, false)} × ${trade.quantity.toLocaleString()}株</small></div><div class="trade-result"><strong class="${resultClass}">${result}</strong>${trade.action === "買付" && position ? `<button class="sale-register-button" data-action="sell" data-code="${esc(trade.code)}" data-style="${esc(trade.style)}" type="button">売却記録を登録</button>` : ""}</div></div>`;
 }
 
-function lossRange(period) {
+function periodDates(period, offset = 0) {
   const start = new Date();
   start.setHours(0, 0, 0, 0);
-  const end = new Date(start);
-  if (period === "week") {
+  if (period === "day") {
+    start.setDate(start.getDate() + offset);
+  } else if (period === "week") {
     const day = start.getDay();
-    start.setDate(start.getDate() - (day === 0 ? 6 : day - 1));
-    end.setTime(start.getTime()); end.setDate(end.getDate() + 4);
-  } else if (period === "month") {
-    start.setDate(1); end.setFullYear(start.getFullYear(), start.getMonth() + 1, 0);
+    start.setDate(start.getDate() - (day === 0 ? 6 : day - 1) + offset * 7);
+  } else {
+    start.setDate(1);
+    start.setMonth(start.getMonth() + offset);
   }
-  const label = period === "day" ? `${start.getFullYear()}/${start.getMonth() + 1}/${start.getDate()}` : period === "week" ? `${start.getMonth() + 1}/${start.getDate()}（月）〜${end.getMonth() + 1}/${end.getDate()}（金）` : `${start.getFullYear()}年${start.getMonth() + 1}月1日〜${end.getDate()}日`;
-  return { start: localDate(start), end: localDate(end), label };
+  const end = new Date(start);
+  if (period === "week") end.setDate(end.getDate() + 4);
+  if (period === "month") end.setFullYear(end.getFullYear(), end.getMonth() + 1, 0);
+  return { start, end };
 }
 
+function pnlRange(period) {
+  const offset = state.pnlPeriodOffsets[period];
+  const current = periodDates(period, offset);
+  const previous = periodDates(period, offset - 1);
+  const minimum = new Date(`${PNL_HISTORY_START}T00:00:00`);
+  const start = current.start < minimum ? minimum : current.start;
+  const weekdays = ["日", "月", "火", "水", "木", "金", "土"];
+  const monthDay = (date) => `${date.getMonth() + 1}/${date.getDate()}（${weekdays[date.getDay()]}）`;
+  const label = period === "day"
+    ? `${start.getFullYear()}/${start.getMonth() + 1}/${start.getDate()}`
+    : period === "week"
+      ? `${monthDay(start)}〜${monthDay(current.end)}`
+      : `${start.getFullYear()}年${start.getMonth() + 1}月${start.getDate()}日〜${current.end.getDate()}日`;
+  return {
+    start: localDate(start),
+    end: localDate(current.end),
+    label,
+    canPrevious: previous.end >= minimum,
+    canNext: offset < 0
+  };
+}
+
+function movePnlPeriod(direction) {
+  const period = state.pnlPeriod;
+  const range = pnlRange(period);
+  if (direction < 0 && !range.canPrevious) return;
+  if (direction > 0 && !range.canNext) return;
+  state.pnlPeriodOffsets[period] += direction;
+}
 function renderRecords(ledger) {
   const term = normalize(state.recordQuery);
   const records = [...ledger.calculated].filter((trade) => !term || normalize(`${trade.code}${trade.name}`).includes(term)).sort((a, b) => -byTimeAsc(a, b));
   const completed = ledger.calculated.filter((trade) => trade.action === "売却" && trade.realisedProfit !== null);
-  const losses = completed.filter((trade) => trade.realisedProfit < 0);
-  const period = lossRange(state.lossPeriod);
-  const totalLoss = Math.abs(losses.reduce((sum, trade) => sum + trade.realisedProfit, 0));
-  const selectedLoss = Math.abs(losses.filter((trade) => trade.date >= period.start && trade.date <= period.end).reduce((sum, trade) => sum + trade.realisedProfit, 0));
+  const period = pnlRange(state.pnlPeriod);
+  const totalPnl = completed.reduce((sum, trade) => sum + trade.realisedProfit, 0);
+  const selectedPnl = completed.filter((trade) => trade.date >= period.start && trade.date <= period.end).reduce((sum, trade) => sum + trade.realisedProfit, 0);
   const positions = new Map(ledger.positions.map((position) => [position.code, position]));
   $("#records-view").innerHTML = `
-    <div class="loss-overview"><article class="loss-card"><div><p class="section-kicker">TOTAL LOSS</p><h2>全期間の累計損失</h2></div><strong class="negative">${yen(-totalLoss)}</strong><small>期間切替にかかわらず固定表示</small></article><article class="loss-card"><div class="loss-card-heading"><div><p class="section-kicker">PERIOD LOSS</p><h2>期間別の損失</h2></div><div class="loss-period-switch">${[["day","当日"],["week","週間"],["month","月間"]].map(([value,label]) => `<button class="${state.lossPeriod === value ? "active" : ""}" data-action="loss-period" data-period="${value}" type="button">${label}</button>`).join("")}</div></div><strong class="negative">${yen(-selectedLoss)}</strong><small>${period.label} ・ 利益とは相殺せず損失だけを合算</small></article></div>
+    <div class="pnl-overview">
+      <article class="pnl-card"><div><p class="section-kicker">TOTAL PROFIT / LOSS</p><h2>全期間の累計損益</h2></div><strong class="${totalPnl >= 0 ? "positive" : "negative"}">${yen(totalPnl)}</strong><small>売却済み取引の利益と損失を全期間で合算</small></article>
+      <article class="pnl-card"><div class="pnl-card-heading"><div><p class="section-kicker">PERIOD PROFIT / LOSS</p><h2>期間別の損益</h2></div><div class="pnl-period-switch">${[["day","一日"],["week","週間"],["month","月間"]].map(([value,label]) => `<button class="${state.pnlPeriod === value ? "active" : ""}" data-action="pnl-period" data-period="${value}" type="button">${label}</button>`).join("")}</div></div>
+      <div class="pnl-period-navigation"><button data-action="pnl-period-move" data-direction="-1" type="button" ${period.canPrevious ? "" : "disabled"}>‹ 前へ</button><span>${period.label}</span><button data-action="pnl-period-move" data-direction="1" type="button" ${period.canNext ? "" : "disabled"}>次へ ›</button></div>
+      <strong class="${selectedPnl >= 0 ? "positive" : "negative"}">${yen(selectedPnl)}</strong><small>表示期間内の売却済み取引について、利益と損失を合算</small></article>
+    </div>
     <div class="view-panel"><div class="records-toolbar"><label class="search-field">⌕<input id="record-search" value="${esc(state.recordQuery)}" placeholder="銘柄コード・銘柄名で検索"></label><div class="record-summary"><span>${records.length}件</span><strong class="${records.reduce((sum,t)=>sum+(t.realisedProfit??0),0)>=0?"positive":"negative"}">${yen(records.reduce((sum,t)=>sum+(t.realisedProfit??0),0))}</strong></div></div>
     <div class="trade-table"><div class="table-head"><span>取引日</span><span>銘柄</span><span>区分</span><span>売買</span><span>約定価格</span><span>株数</span><span>実現損益</span><span>操作</span></div>${records.map((trade) => {
       const position = positions.get(trade.code);
@@ -405,7 +443,8 @@ document.addEventListener("click", async (event) => {
   if (target.id === "fill-all") { $("#trade-quantity").value = state.form.sellContext.maxQuantity; updateSalePreview(); return; }
   const action = target.dataset.action;
   if (action === "view-records") switchView("records");
-  if (action === "loss-period") { state.lossPeriod = target.dataset.period; renderRecords(calculateLedger(state.trades)); }
+  if (action === "pnl-period") { state.pnlPeriod = target.dataset.period; renderRecords(calculateLedger(state.trades)); }
+  if (action === "pnl-period-move") { movePnlPeriod(Number(target.dataset.direction)); renderRecords(calculateLedger(state.trades)); }
   if (action === "sell") openSell(target.dataset.code, target.dataset.style ?? "スイング");
   if (action === "choose-security") { const security = state.securities.find((item) => item.code === target.dataset.code); state.form.selected = security; state.form.manual = false; $("#security-query").value = `${security.code}　${security.name}`; $("#security-options").classList.add("hidden"); $("#manual-fields").classList.add("hidden"); }
   if (action === "manual-security") { state.form.manual = true; state.form.selected = null; $("#security-options").classList.add("hidden"); $("#manual-fields").classList.remove("hidden"); $("#manual-code").focus(); }
