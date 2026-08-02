@@ -113,7 +113,7 @@ function statsFor(completed) {
     peak = Math.max(peak, total);
     maxDrawdown = Math.min(maxDrawdown, total - peak);
   });
-  return { profit: grossProfit - grossLoss, taxReference: completed.reduce((sum, trade) => sum + afterTax(trade.realisedProfit), 0), winRate: completed.length ? wins.length / completed.length * 100 : 0, pf: grossLoss ? grossProfit / grossLoss : grossProfit ? Infinity : 0, maxDrawdown };
+  return { profit: grossProfit - grossLoss, taxReference: completed.reduce((sum, trade) => sum + afterTax(trade.realisedProfit), 0), winRate: completed.length ? wins.length / completed.length * 100 : 0, winCount: wins.length, saleCount: completed.length, pf: grossLoss ? grossProfit / grossLoss : grossProfit ? Infinity : 0, maxDrawdown };
 }
 
 function chartSvg(completed) {
@@ -145,7 +145,7 @@ function renderOverview(ledger, completed, stats) {
   $("#overview-view").innerHTML = `
     <div class="stats-grid">
       <article class="stat-card"><div class="stat-top"><span>実現損益</span><i>¥</i></div><strong class="${stats.profit >= 0 ? "positive" : "negative"}">${yen(stats.profit)}</strong><small>税引後参考 ${yen(stats.taxReference)}<br>利益に20.315％を単純適用</small></article>
-      <article class="stat-card"><div class="stat-top"><span>勝率</span><i>◎</i></div><strong class="positive">${stats.winRate.toFixed(1)}%</strong><small>利益が出た売却の割合</small></article>
+      <article class="stat-card"><div class="stat-top"><span>勝率</span><i>◎</i></div><strong class="positive">${stats.winRate.toFixed(1)}%</strong><small>勝ち売却数 / 全売却数<br>${stats.winCount} / ${stats.saleCount}</small></article>
       <article class="stat-card"><div class="stat-top"><span>PF</span><i>⚖</i></div><strong class="positive">${Number.isFinite(stats.pf) ? stats.pf.toFixed(2) : "∞"}</strong><small>総利益 ÷ 総損失</small></article>
       <article class="stat-card"><div class="stat-top"><span>最大DD</span><i>↘</i></div><strong class="negative">${yen(stats.maxDrawdown)}</strong><small>累積損益の最大下落額</small></article>
     </div>
