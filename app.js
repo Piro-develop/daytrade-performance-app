@@ -25,7 +25,7 @@ const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 const esc = (value = "") => String(value).replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
 const localDate = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-const yen = (value, signed = true) => `${signed && value > 0 ? "+" : signed && value < 0 ? "−" : ""}¥${Math.abs(value).toLocaleString("ja-JP", { maximumFractionDigits: 0 })}`;
+const yen = (value, signed = true) => `${signed && value > 0 ? "+" : signed && value < 0 ? "−" : ""}${Math.abs(value).toLocaleString("ja-JP", { maximumFractionDigits: 0 })}円`;
 const afterTax = (profit) => profit > 0 ? profit * (1 - TAX_RATE) : profit;
 const normalize = (value) => String(value ?? "").normalize("NFKC").toLowerCase().replace(/[\s・（）()株式会社]/g, "");
 const byTimeAsc = (a, b) => a.date.localeCompare(b.date) || (a.createdAt ?? 0) - (b.createdAt ?? 0) || a.id.localeCompare(b.id);
@@ -147,7 +147,7 @@ function renderOverview(ledger, completed, stats) {
   const positions = new Map(ledger.positions.map((position) => [position.code, position]));
   $("#overview-view").innerHTML = `
     <div class="stats-grid">
-      <article class="stat-card"><div class="stat-top"><span>実現損益</span><i>¥</i></div><strong class="${stats.profit >= 0 ? "positive" : "negative"}">${yen(stats.profit)}</strong><small>税引後参考 ${yen(stats.taxReference)}<br>利益に20.315％を単純適用</small></article>
+      <article class="stat-card"><div class="stat-top"><span>実現損益</span><i>円</i></div><strong class="${stats.profit >= 0 ? "positive" : "negative"}">${yen(stats.profit)}</strong><small>税引後参考 ${yen(stats.taxReference)}<br>利益に20.315％を単純適用</small></article>
       <article class="stat-card"><div class="stat-top"><span>勝率</span><i>◎</i></div><strong class="positive">${stats.winRate.toFixed(1)}%</strong><small>勝ち売却数 / 全売却数<br>${stats.winCount} / ${stats.saleCount}</small></article>
       <article class="stat-card"><div class="stat-top"><span>PF</span><i>⚖</i></div><strong class="positive">${Number.isFinite(stats.pf) ? stats.pf.toFixed(2) : "∞"}</strong><small>総利益 ÷ 総損失</small></article>
       <article class="stat-card"><div class="stat-top"><span>最大DD</span><i>↘</i></div><strong class="negative">${yen(stats.maxDrawdown)}</strong><small>累積損益の最大下落額</small></article>
@@ -169,6 +169,11 @@ function tradeCard(trade, positions) {
 
 function parseLocalDate(value) {
   return new Date(`${value}T00:00:00`);
+}
+
+function japaneseDate(value) {
+  const date = parseLocalDate(value);
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
 }
 
 function weekLabel(start) {
@@ -232,6 +237,15 @@ function pnlPeriodSelector(period) {
 function renderRecords(ledger) {
   const term = normalize(state.recordQuery);
   const records = [...ledger.calculated].filter((trade) => !term || normalize(`${trade.code}${trade.name}`).includes(term)).sort((a, b) => -byTimeAsc(a, b));
+  const recordGroups = [];
+  records.forEach((trade) => {
+    let group = recordGroups.at(-1);
+    if (!group || group.date !== trade.date) {
+      group = { date: trade.date, trades: [] };
+      recordGroups.push(group);
+    }
+    group.trades.push(trade);
+  });
   const completed = ledger.calculated.filter((trade) => trade.action === "売却" && trade.realisedProfit !== null);
   const period = pnlRange(state.pnlPeriod);
   const totalPnl = completed.reduce((sum, trade) => sum + trade.realisedProfit, 0);
@@ -244,12 +258,12 @@ function renderRecords(ledger) {
       <div class="pnl-period-selector">${pnlPeriodSelector(state.pnlPeriod)}</div>
       <strong class="${selectedPnl >= 0 ? "positive" : "negative"}">${yen(selectedPnl)}</strong><small>${period.label} ・ 表示期間内の売却済み取引について、利益と損失を合算</small></article>
     </div>
-    <div class="view-panel"><div class="records-toolbar"><label class="search-field">⌕<input id="record-search" value="${esc(state.recordQuery)}" placeholder="銘柄コード・銘柄名で検索"></label><div class="record-summary"><span>${records.length}件</span><strong class="${records.reduce((sum,t)=>sum+(t.realisedProfit??0),0)>=0?"positive":"negative"}">${yen(records.reduce((sum,t)=>sum+(t.realisedProfit??0),0))}</strong></div></div>
-    <div class="trade-table"><div class="table-head"><span>取引日</span><span>銘柄</span><span>区分</span><span>売買</span><span>約定価格</span><span>株数</span><span>実現損益</span><span>操作</span></div>${records.map((trade) => {
-      const position = positions.get(trade.code);
-      const tax = trade.realisedProfit === null ? "" : `<small>税引後参考 ${yen(afterTax(trade.realisedProfit))}</small>`;
-      return `<article class="table-row"><span data-label="取引日">${trade.date}</span><span data-label="銘柄"><strong>${esc(trade.code)}</strong><small>${esc(trade.name)}</small></span><span data-label="区分"><b class="style-badge">${esc(trade.style)}</b></span><span data-label="売買"><b class="${trade.action === "買付" ? "buy-text" : "sell-text"}">${trade.action}</b></span><span data-label="約定価格">${yen(trade.price,false)}</span><span data-label="株数">${trade.quantity.toLocaleString()}株</span><span data-label="実現損益" class="row-profit ${trade.realisedProfit === null ? "" : trade.realisedProfit >= 0 ? "positive" : "negative"}"><strong>${trade.realisedProfit === null ? "—" : yen(trade.realisedProfit)}</strong>${tax}</span><span data-label="操作" class="row-actions">${trade.action === "買付" && position ? `<button class="icon-button" title="売却記録を登録" data-action="sell" data-code="${esc(trade.code)}" data-style="${esc(trade.style)}" data-date="${esc(trade.date)}">売</button>` : ""}<button class="icon-button" title="修正" data-action="edit" data-id="${esc(trade.id)}">修</button><button class="icon-button delete" title="削除" data-action="delete" data-id="${esc(trade.id)}">削</button></span></article>`;
-    }).join("") || '<div class="empty-state">該当する売買はありません</div>'}</div></div>`;
+    <div class="view-panel records-list-panel"><div class="records-toolbar"><label class="search-field">⌕<input id="record-search" value="${esc(state.recordQuery)}" placeholder="銘柄コード・銘柄名で検索"></label><div class="record-summary"><span>${records.length}件</span><strong class="${records.reduce((sum,t)=>sum+(t.realisedProfit??0),0)>=0?"positive":"negative"}">${yen(records.reduce((sum,t)=>sum+(t.realisedProfit??0),0))}</strong></div></div>
+    <div class="record-groups">${recordGroups.map((group) => `<section class="record-day"><h3>${japaneseDate(group.date)}</h3><div class="record-day-list">${group.trades.map((trade) => {
+      const result = trade.action === "買付" ? "買付" : trade.realisedProfit === null ? "確認要" : yen(trade.realisedProfit);
+      const resultClass = trade.action === "買付" ? "buy-text" : trade.realisedProfit === null ? "muted" : trade.realisedProfit >= 0 ? "positive" : "negative";
+      return `<div class="record-entry"><button class="record-entry-main" data-action="edit" data-id="${esc(trade.id)}" type="button"><span class="style-badge">${esc(trade.style)}</span><span class="record-security"><strong>${esc(trade.code)}</strong><span>${esc(trade.name)}</span></span><strong class="record-entry-result ${resultClass}">${result}</strong><span class="record-chevron">›</span></button><button class="record-delete" data-action="delete" data-id="${esc(trade.id)}" title="削除" type="button">削</button></div>`;
+    }).join("")}</div></section>`).join("") || `<div class="empty-state">該当する売買はありません</div>`}</div></div>`;
   const search = $("#record-search");
   search?.addEventListener("input", (event) => { state.recordQuery = event.target.value; renderRecords(calculateLedger(state.trades)); requestAnimationFrame(() => { const next = $("#record-search"); next?.focus(); next?.setSelectionRange(state.recordQuery.length, state.recordQuery.length); }); });
   $("#pnl-period-picker")?.addEventListener("change", (event) => { state.pnlSelections[state.pnlPeriod] = event.target.value; renderRecords(calculateLedger(state.trades)); });
@@ -288,6 +302,7 @@ function resetForm() {
   $("#security-field").classList.remove("hidden");
   $("#fixed-security").classList.add("hidden");
   $("#trade-quantity").removeAttribute("max");
+  $("#sell-from-edit").classList.add("hidden");
 }
 
 function openBuy(editTrade = null) {
@@ -311,6 +326,7 @@ function openBuy(editTrade = null) {
     $("#trade-price").value = editTrade.price;
     $("#trade-quantity").value = editTrade.quantity;
     $("#trade-note").value = editTrade.note ?? "";
+    if (calculateLedger(state.trades).positions.some((position) => position.code === editTrade.code)) $("#sell-from-edit").classList.remove("hidden");
   }
   $("#modal-backdrop").classList.remove("hidden");
 }
@@ -452,6 +468,7 @@ $("#login-button").addEventListener("click", login);
 $("#open-buy").addEventListener("click", () => openBuy());
 $("#close-modal").addEventListener("click", closeModal);
 $("#cancel-modal").addEventListener("click", closeModal);
+$("#sell-from-edit").addEventListener("click", () => { const trade = state.trades.find((item) => item.id === state.form.editId); if (!trade) return; closeModal(); openSell(trade.code, trade.style, null, trade.date); });
 $("#trade-form").addEventListener("submit", saveTrade);
 $("#security-query").addEventListener("focus", showSecurityOptions);
 $("#security-query").addEventListener("input", () => { state.form.selected = null; state.form.manual = false; $("#manual-fields").classList.add("hidden"); showSecurityOptions(); });
@@ -471,7 +488,7 @@ document.addEventListener("click", async (event) => {
   if (action === "sell") openSell(target.dataset.code, target.dataset.style ?? "スイング", null, target.dataset.date ?? null);
   if (action === "choose-security") { const security = state.securities.find((item) => item.code === target.dataset.code); state.form.selected = security; state.form.manual = false; $("#security-query").value = `${security.code}　${security.name}`; $("#security-options").classList.add("hidden"); $("#manual-fields").classList.add("hidden"); }
   if (action === "manual-security") { state.form.manual = true; state.form.selected = null; $("#security-options").classList.add("hidden"); $("#manual-fields").classList.remove("hidden"); $("#manual-code").focus(); }
-  if (action === "edit") { const trade = state.trades.find((item) => item.id === target.dataset.id); trade.action === "買付" ? openBuy(trade) : openSell(trade.code, trade.style, trade); }
+  if (action === "edit") { const trade = state.trades.find((item) => item.id === target.dataset.id); if (trade) trade.action === "買付" ? openBuy(trade) : openSell(trade.code, trade.style, trade); }
   if (action === "delete") await removeTrade(target.dataset.id);
   if (action === "csv") exportCsv();
   if (action === "logout") await signOut(auth);
