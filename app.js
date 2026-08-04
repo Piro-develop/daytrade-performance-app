@@ -146,10 +146,13 @@ function render() {
 function renderOverview(ledger, completed, stats) {
   const recent = [...ledger.calculated].sort((a, b) => -byTimeAsc(a, b)).slice(0, 4);
   const positions = new Map(ledger.positions.map((position) => [position.code, position]));
+  const summaryStats = [["全体", stats], ...["デイトレ", "スイング"].map((style) => [style, statsFor(completed.filter((trade) => trade.style === style))])];
+  const profitSummary = summaryStats.map(([label, item]) => { const afterTaxValue = Math.trunc(item.taxReference); return `<div class="summary-breakdown-row"><span>${label}：</span><span class="summary-breakdown-values"><strong class="${item.profit > 0 ? "positive" : item.profit < 0 ? "negative" : "muted"}">${item.profit === 0 ? "± 0円" : yen(item.profit)}</strong><small>(${yen(afterTaxValue, afterTaxValue < 0)})</small></span></div>`; }).join("");
+  const winSummary = summaryStats.map(([label, item]) => `<div class="summary-breakdown-row"><span>${label}：</span><span class="summary-breakdown-values"><strong class="positive">${item.winRate.toFixed(1)}%</strong><small>(${item.winCount}/${item.saleCount})</small></span></div>`).join("");
   $("#overview-view").innerHTML = `
     <div class="stats-grid">
-      <article class="stat-card"><div class="stat-top"><span>実現損益</span><i>円</i></div><strong class="${stats.profit >= 0 ? "positive" : "negative"}">${yen(stats.profit)}</strong><small>税引後参考 ${yen(stats.taxReference)}<br>利益に20.315％を単純適用</small></article>
-      <article class="stat-card"><div class="stat-top"><span>勝率</span><i>◎</i></div><strong class="positive">${stats.winRate.toFixed(1)}%</strong><small>勝ち売却数 / 全売却数<br>${stats.winCount} / ${stats.saleCount}</small></article>
+      <article class="stat-card breakdown-card"><div class="stat-top"><span>実現損益</span><i>円</i></div><div class="summary-breakdown">${profitSummary}</div></article>
+      <article class="stat-card breakdown-card"><div class="stat-top"><span>勝率</span><i>◎</i></div><div class="summary-breakdown">${winSummary}</div></article>
       <article class="stat-card"><div class="stat-top"><span>PF</span><i>⚖</i></div><strong class="positive">${Number.isFinite(stats.pf) ? stats.pf.toFixed(2) : "∞"}</strong><small>総利益 ÷ 総損失</small></article>
       <article class="stat-card"><div class="stat-top"><span>最大DD</span><i>↘</i></div><strong class="negative">${yen(stats.maxDrawdown)}</strong><small>累積損益の最大下落額</small></article>
     </div>
