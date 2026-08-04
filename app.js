@@ -27,7 +27,7 @@ const esc = (value = "") => String(value).replace(/[&<>'"]/g, (char) => ({ "&": 
 const localDate = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 const yen = (value, signed = true) => `${signed && value > 0 ? "+ " : signed && value < 0 ? "− " : ""}${Math.abs(value).toLocaleString("ja-JP", { maximumFractionDigits: 0 })}円`;
 const afterTax = (profit) => profit > 0 ? profit * (1 - TAX_RATE) : profit;
-const normalize = (value) => String(value ?? "").normalize("NFKC").toLowerCase().replace(/[\s・（）()株式会社]/g, "");
+const normalize = (value) => String(value ?? "").normalize("NFKC").toLowerCase().replace(/[ァ-ヶ]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0x60)).replace(/[\s・（）()株式会社]/g, "");
 const byTimeAsc = (a, b) => a.date.localeCompare(b.date) || (a.createdAt ?? 0) - (b.createdAt ?? 0) || a.id.localeCompare(b.id);
 
 const state = {
@@ -379,7 +379,7 @@ function closeModal() { $("#modal-backdrop").classList.add("hidden"); resetForm(
 function showSecurityOptions() {
   if (state.form.action !== "買付") return;
   const term = normalize($("#security-query").value);
-  const matches = state.securities.filter((security) => !term || normalize(`${security.code}${security.name}`).includes(term)).slice(0, 10);
+  const matches = state.securities.filter((security) => !term || normalize(`${security.code}${security.name}${security.reading ?? ""}`).includes(term)).slice(0, 20);
   const options = $("#security-options");
   options.innerHTML = `${matches.map((security) => `<button class="security-option" data-action="choose-security" data-code="${esc(security.code)}" type="button"><strong>${esc(security.code)}</strong><span>${esc(security.name)}</span><small>${esc(security.market)}</small></button>`).join("")}${term ? '<button class="manual-option" data-action="manual-security" type="button">一覧にない銘柄を手動入力</button>' : ""}`;
   options.classList.remove("hidden");
@@ -450,10 +450,10 @@ async function login() {
 }
 
 async function loadStocks() {
-  const response = await fetch("./stocks.json");
-  if (!response.ok) throw new Error("銘柄一覧を読み込めませんでした");
-  const data = await response.json();
-  state.securities = data.securities;
+  const [response, readingResponse] = await Promise.all([fetch("./stocks.json"), fetch("./stock-readings.json")]);
+  if (!response.ok || !readingResponse.ok) throw new Error("銘柄一覧を読み込めませんでした");
+  const [data, readingData] = await Promise.all([response.json(), readingResponse.json()]);
+  state.securities = data.securities.map((security) => ({ ...security, reading: readingData.readings[security.code] ?? "" }));
   state.stocksAsOf = data.asOf.replaceAll("-", "/");
 }
 
