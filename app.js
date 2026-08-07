@@ -25,6 +25,7 @@ const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 const esc = (value = "") => String(value).replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
 const localDate = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+const currentWeekStart = () => { const date = new Date(); date.setHours(0, 0, 0, 0); const day = date.getDay(); date.setDate(date.getDate() - (day === 0 ? 6 : day - 1)); return localDate(date); };
 const yen = (value, signed = true) => `${signed && value > 0 ? "+ " : signed && value < 0 ? "− " : ""}${Math.abs(value).toLocaleString("ja-JP", { maximumFractionDigits: 0 })}円`;
 const afterTax = (profit) => profit > 0 ? profit * (1 - TAX_RATE) : profit;
 const normalize = (value) => String(value ?? "").normalize("NFKC").toLowerCase().replace(/[ァ-ヶ]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0x60)).replace(/[\s・（）()株式会社]/g, "");
@@ -39,7 +40,7 @@ const state = {
   range: "30",
   recordQuery: "",
   pnlPeriod: "day",
-  pnlSelections: { day: localDate(), week: PNL_WEEK_START, month: PNL_MONTH_START },
+  pnlSelections: { day: localDate(), week: currentWeekStart(), month: localDate().slice(0, 7) },
   unsubscribe: null,
   form: { mode: "new", action: "買付", editId: null, selected: null, manual: false, sellContext: null }
 };
