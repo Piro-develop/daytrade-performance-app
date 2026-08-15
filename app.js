@@ -39,7 +39,7 @@ const state = {
   securities: [],
   stocksAsOf: "",
   activeView: "overview",
-  range: "30",
+  summaryFilters: { period: "day", style: "all", accountType: "all" },
   recordQuery: "",
   pnlPeriod: "day",
   pnlSelections: { day: localDate(), week: currentWeekStart(), month: localDate().slice(0, 7) },
@@ -94,17 +94,22 @@ function calculateLedger(trades) {
   };
 }
 
-function rangeStart(days) {
-  if (days === "all") return "0000-00-00";
-  const date = new Date();
-  date.setHours(0, 0, 0, 0);
-  date.setDate(date.getDate() - Number(days) + 1);
-  return localDate(date);
+function summaryPeriodStart(period) {
+  if (period === "all") return "0000-00-00";
+  if (period === "day") return localDate();
+  if (period === "week") return currentWeekStart();
+  return `${localDate().slice(0, 7)}-01`;
 }
 
-function completedForRange(calculated) {
-  const start = rangeStart(state.range);
-  return calculated.filter((trade) => trade.action === "売却" && trade.realisedProfit !== null && trade.date >= start);
+function matchesSummaryFilters(trade, includePeriod = true) {
+  const { period, style, accountType } = state.summaryFilters;
+  return (!includePeriod || trade.date >= summaryPeriodStart(period))
+    && (style === "all" || trade.style === style)
+    && (accountType === "all" || accountTypeOf(trade) === accountType);
+}
+
+function completedForSummary(calculated) {
+  return calculated.filter((trade) => trade.action === "売却" && trade.realisedProfit !== null && matchesSummaryFilters(trade));
 }
 
 function statsFor(completed) {
@@ -118,7 +123,19 @@ function statsFor(completed) {
     peak = Math.max(peak, total);
     maxDrawdown = Math.min(maxDrawdown, total - peak);
   });
-  return { profit: grossProfit - grossLoss, taxReference: completed.reduce((sum, trade) => sum + afterTax(trade.realisedProfit), 0), winRate: completed.length ? wins.length / completed.length * 100 : 0, winCount: wins.length, saleCount: completed.length, pf: grossLoss ? grossProfit / grossLoss : grossProfit ? Infinity : 0, maxDrawdown };
+  return {
+    profit: grossProfit - grossLoss,
+    taxReference: completed.reduce((sum, trade) => sum + afterTax(trade.realisedProfit), 0),
+    winRate: completed.length ? wins.length / completed.length * 100 : 0,
+    winCount: wins.length,
+    saleCount: completed.length,
+    averageProfit: wins.length ? grossProfit / wins.length : 0,
+    averageLoss: losses.length ? -grossLoss / losses.length : 0,
+    maxProfit: wins.length ? Math.max(...wins.map((trade) => trade.realisedProfit)) : 0,
+    maxLoss: losses.length ? Math.min(...losses.map((trade) => trade.realisedProfit)) : 0,
+    pf: grossLoss ? grossProfit / grossLoss : grossProfit ? Infinity : 0,
+    maxDrawdown
+  };
 }
 
 function chartSvg(completed) {
@@ -140,7 +157,7 @@ function chartSvg(completed) {
 function render() {
   if (!state.user) return;
   const ledger = calculateLedger(state.trades);
-  const completed = completedForRange(ledger.calculated);
+  const completed = completedForSummary(ledger.calculated);
   const stats = statsFor(completed);
   renderOverview(ledger, completed, stats);
   renderRecords(ledger);
@@ -148,27 +165,51 @@ function render() {
   renderSettings();
 }
 
-function renderOverview(ledger, completed, stats) {
-  const recent = [...ledger.calculated].sort((a, b) => -byTimeAsc(a, b)).slice(0, 4);
-  const positions = new Map(ledger.positions.map((position) => [positionKey(position.code, position.accountType), position]));
-  const summaryStats = [["全体", stats], ...["デイトレ", "スイング"].map((style) => [style, statsFor(completed.filter((trade) => trade.style === style))])];
-  const profitSummary = summaryStats.map(([label, item]) => { const afterTaxValue = Math.trunc(item.taxReference); return `<div class="summary-breakdown-row"><span>${label}：</span><span class="summary-breakdown-values"><strong class="${item.profit > 0 ? "positive" : item.profit < 0 ? "negative" : "muted"}">${item.profit === 0 ? "± 0円" : yen(item.profit)}</strong><small>(${yen(afterTaxValue, afterTaxValue < 0)})</small></span></div>`; }).join("");
-  const winSummary = summaryStats.map(([label, item]) => `<div class="summary-breakdown-row"><span>${label}：</span><span class="summary-breakdown-values"><strong class="positive">${item.winRate.toFixed(1)}%</strong><small>(${item.winCount}/${item.saleCount})</small></span></div>`).join("");
-  $("#overview-view").innerHTML = `
-    <div class="stats-grid">
-      <article class="stat-card breakdown-card"><div class="stat-top"><span>実現損益</span><i>円</i></div><div class="summary-breakdown">${profitSummary}</div></article>
-      <article class="stat-card breakdown-card"><div class="stat-top"><span>勝率</span><i>◎</i></div><div class="summary-breakdown">${winSummary}</div></article>
-      <article class="stat-card"><div class="stat-top"><span>PF</span><i>⚖</i></div><strong class="positive">${Number.isFinite(stats.pf) ? stats.pf.toFixed(2) : "∞"}</strong><small>総利益 ÷ 総損失</small></article>
-      <article class="stat-card"><div class="stat-top"><span>最大DD</span><i>↘</i></div><strong class="negative">${yen(stats.maxDrawdown)}</strong><small>累積損益の最大下落額</small></article>
-    </div>
-    <div class="dashboard-grid">
-      <article class="panel"><div class="panel-heading"><div><p class="section-kicker">PERFORMANCE</p><h2>累積実現損益</h2></div><span class="period-badge">${state.range === "all" ? "全期間" : `過去${state.range}日`}</span></div><div class="chart-wrap">${chartSvg(completed)}</div></article>
-      <article class="panel"><div class="panel-heading"><div><p class="section-kicker">OPEN POSITIONS</p><h2>保有中の銘柄</h2></div><span class="period-badge">${ledger.positions.length}銘柄</span></div><div class="position-list">${ledger.positions.map((position) => `
-        <div class="position-row"><div><strong>${esc(position.code)} ${esc(position.name)}</strong><small>${esc(position.market)} ・ ${esc(position.accountType)} ・ 平均取得 ${yen(position.averagePrice, false)}</small></div><div class="position-actions"><strong>${position.quantity.toLocaleString()}株</strong><button class="sale-register-button" data-action="sell" data-code="${esc(position.code)}" data-account-type="${esc(position.accountType)}" type="button">売却記録を登録</button></div></div>`).join("") || '<div class="empty-state">現在の保有銘柄はありません</div>'}</div></article>
-    </div>
-    <article class="panel recent-panel"><div class="panel-heading"><div><p class="section-kicker">RECENT ACTIVITY</p><h2>直近の売買</h2></div><button class="text-button" data-action="view-records" type="button">すべて見る ›</button></div><div class="trade-list compact">${recent.map((trade) => tradeCard(trade, positions)).join("") || '<div class="empty-state">「＋」から最初の買付を登録してください</div>'}</div></article>`;
+function summaryFilterGroup(key, label, options) {
+  return `<div class="summary-filter-row"><span>${label}</span><div class="summary-filter-options" role="group" aria-label="${label}">${options.map(([value, text]) => `<button class="${state.summaryFilters[key] === value ? "active" : ""}" data-action="summary-filter" data-filter="${key}" data-value="${value}" type="button" aria-pressed="${state.summaryFilters[key] === value}">${text}</button>`).join("")}</div></div>`;
 }
 
+function renderOverview(ledger, completed, stats) {
+  const recent = [...ledger.calculated].filter((trade) => matchesSummaryFilters(trade)).sort((a, b) => -byTimeAsc(a, b)).slice(0, 4);
+  const positions = new Map(ledger.positions.map((position) => [positionKey(position.code, position.accountType), position]));
+  const styleSummary = state.summaryFilters.style === "all"
+    ? [["全体", stats], ...["デイトレ", "スイング"].map((style) => [style, statsFor(completed.filter((trade) => trade.style === style))])]
+    : [[state.summaryFilters.style, stats]];
+  const profitSummary = styleSummary.map(([label, item]) => { const taxValue = Math.trunc(item.taxReference); return `<div class="summary-breakdown-row"><span>${label}：</span><span class="summary-breakdown-values"><strong class="${item.profit > 0 ? "positive" : item.profit < 0 ? "negative" : "muted"}">${item.profit === 0 ? "± 0円" : yen(item.profit)}</strong><small>(${taxValue === 0 ? "0円" : yen(taxValue)})</small></span></div>`; }).join("");
+  const winSummary = styleSummary.map(([label, item]) => `<div class="summary-breakdown-row"><span>${label}：</span><span class="summary-breakdown-values"><strong class="${item.saleCount ? "positive" : "muted"}">${item.winRate.toFixed(1)}%</strong><small>(${item.winCount}/${item.saleCount})</small></span></div>`).join("");
+  const metricYen = (value) => value === 0 ? "± 0円" : yen(value);
+  const metricClass = (value) => value > 0 ? "positive" : value < 0 ? "negative" : "muted";
+  const metricCard = (label, icon, value, note, className = "") => `<article class="stat-card compact-stat"><div class="stat-top"><span>${label}</span><i>${icon}</i></div><strong class="${className}">${value}</strong><small>${note}</small></article>`;
+  const periodLabels = { day: "今日", week: "今週", month: "今月", all: "全期間" };
+  const styleLabels = { all: "全て", デイトレ: "デイトレ", スイング: "スイング" };
+  const accountLabels = { all: "全て", 現物: "現物", 信用: "信用" };
+  const filterLabel = `${periodLabels[state.summaryFilters.period]} × ${styleLabels[state.summaryFilters.style]} × ${accountLabels[state.summaryFilters.accountType]}`;
+  $("#overview-view").innerHTML = `
+    <section class="summary-filters" aria-label="サマリの集計条件">
+      <div class="summary-filter-heading"><div><p class="section-kicker">SUMMARY FILTERS</p><h2>集計条件</h2></div><small>${filterLabel}</small></div>
+      ${summaryFilterGroup("period", "期間", [["day","今日"],["week","週"],["month","月"],["all","全期間"]])}
+      ${summaryFilterGroup("style", "取引スタイル", [["all","全て"],["デイトレ","デイトレ"],["スイング","スイング"]])}
+      ${summaryFilterGroup("accountType", "取引区分", [["all","全て"],["現物","現物"],["信用","信用"]])}
+    </section>
+    <div class="stats-grid summary-stats-grid">
+      <article class="stat-card breakdown-card"><div class="stat-top"><span>実現損益</span><i>円</i></div><div class="summary-breakdown">${profitSummary}</div></article>
+      ${metricCard("税引後損益", "税", metricYen(Math.trunc(stats.taxReference)), "利益に20.315％を適用した参考値", metricClass(stats.taxReference))}
+      <article class="stat-card breakdown-card"><div class="stat-top"><span>勝率</span><i>◎</i></div><div class="summary-breakdown">${winSummary}</div></article>
+      ${metricCard("取引回数", "回", `${stats.saleCount.toLocaleString()}回`, "売却が完了した取引", stats.saleCount ? "positive" : "muted")}
+      ${metricCard("PF", "⚖", Number.isFinite(stats.pf) ? stats.pf.toFixed(2) : "∞", "総利益 ÷ 総損失", stats.pf ? "positive" : "muted")}
+      ${metricCard("平均利益", "＋", metricYen(stats.averageProfit), "利益になった取引の平均", metricClass(stats.averageProfit))}
+      ${metricCard("平均損失", "−", metricYen(stats.averageLoss), "損失になった取引の平均", metricClass(stats.averageLoss))}
+      ${metricCard("最大利益", "↑", metricYen(stats.maxProfit), "1取引あたりの最大利益", metricClass(stats.maxProfit))}
+      ${metricCard("最大損失", "↓", metricYen(stats.maxLoss), "1取引あたりの最大損失", metricClass(stats.maxLoss))}
+      ${metricCard("最大DD", "↘", metricYen(stats.maxDrawdown), "累積損益の最大下落額", metricClass(stats.maxDrawdown))}
+    </div>
+    <div class="dashboard-grid">
+      <article class="panel"><div class="panel-heading"><div><p class="section-kicker">PERFORMANCE</p><h2>累積実現損益</h2></div><span class="period-badge">${filterLabel}</span></div><div class="chart-wrap">${chartSvg(completed)}</div></article>
+      <article class="panel"><div class="panel-heading"><div><p class="section-kicker">OPEN POSITIONS</p><h2>保有中の銘柄</h2></div><span class="period-badge">全保有 ${ledger.positions.length}件</span></div><div class="position-list">${ledger.positions.map((position) => `
+        <div class="position-row"><div><strong>${esc(position.code)} ${esc(position.name)}</strong><small>${esc(position.market)} ・ ${esc(position.accountType)} ・ 平均取得 ${yen(position.averagePrice, false)}</small></div><div class="position-actions"><strong>${position.quantity.toLocaleString()}株</strong><button class="sale-register-button" data-action="sell" data-code="${esc(position.code)}" data-account-type="${esc(position.accountType)}" type="button">売却記録を登録</button></div></div>`).join("") || '<div class="empty-state">現在の保有銘柄はありません</div>'}</div></article>
+    </div>
+    <article class="panel recent-panel"><div class="panel-heading"><div><p class="section-kicker">RECENT ACTIVITY</p><h2>条件内の直近売買</h2></div><button class="text-button" data-action="view-records" type="button">すべて見る ›</button></div><div class="trade-list compact">${recent.map((trade) => tradeCard(trade, positions)).join("") || '<div class="empty-state">選択した条件に該当する売買はありません</div>'}</div></article>`;
+}
 function tradeCard(trade, positions) {
   const accountType = accountTypeOf(trade);
   const position = positions.get(positionKey(trade.code, accountType));
@@ -298,8 +339,38 @@ function switchView(view) {
   $(`#${view}-view`).classList.remove("hidden");
   $("#page-title").textContent = headings[view][0];
   $("#page-subtitle").textContent = headings[view][1];
-  $("#range-control").classList.toggle("hidden", view === "settings" || view === "records");
+
   $("#open-buy").classList.toggle("hidden", view === "settings");
+}
+
+function setAccountType(value = "現物", locked = false) {
+  const selected = value === "信用" ? "信用" : "現物";
+  $("#account-type").value = selected;
+  $$("#account-type-switch button").forEach((button) => {
+    const active = button.dataset.value === selected;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+    button.disabled = locked;
+  });
+}
+
+function chooseAccountType(value) {
+  const selected = value === "信用" ? "信用" : "現物";
+  setAccountType(selected);
+  if (state.form.action !== "売却" || state.form.mode !== "edit") return;
+  const editTrade = state.trades.find((trade) => trade.id === state.form.editId);
+  if (!editTrade) return;
+  const ledger = calculateLedger(state.trades);
+  const position = ledger.positions.find((item) => item.code === editTrade.code && item.accountType === selected);
+  const originalAccountType = accountTypeOf(editTrade);
+  const calculatedEdit = ledger.calculated.find((trade) => trade.id === editTrade.id);
+  const sameAccountType = originalAccountType === selected;
+  const maxQuantity = (position?.quantity ?? 0) + (sameAccountType ? editTrade.quantity : 0);
+  const averagePrice = sameAccountType ? calculatedEdit?.averageCostAtSale ?? position?.averagePrice ?? 0 : position?.averagePrice ?? 0;
+  state.form.sellContext = { maxQuantity, averagePrice };
+  $("#trade-quantity").max = String(maxQuantity);
+  $("#quantity-helper").innerHTML = `上限 ${maxQuantity.toLocaleString()}株 <button id="fill-all" type="button">全株を入力</button>`;
+  updateSalePreview();
 }
 
 function resetForm() {
@@ -312,7 +383,7 @@ function resetForm() {
   $("#security-field").classList.remove("hidden");
   $("#fixed-security").classList.add("hidden");
   $("#trade-quantity").removeAttribute("max");
-  $("#account-type").disabled = false;
+  setAccountType("現物");
   $("#sell-from-edit").classList.add("hidden");
 }
 
@@ -334,7 +405,7 @@ function openBuy(editTrade = null) {
     $("#security-query").value = `${editTrade.code}　${editTrade.name}`;
     $("#trade-date").value = editTrade.date;
     $("#trade-style").value = editTrade.style;
-    $("#account-type").value = accountTypeOf(editTrade);
+    setAccountType(accountTypeOf(editTrade));
     $("#trade-price").value = editTrade.price;
     $("#trade-quantity").value = editTrade.quantity;
     $("#trade-note").value = editTrade.note ?? "";
@@ -348,8 +419,9 @@ function openSell(code, style = "スイング", accountType = "現物", editTrad
   const ledger = calculateLedger(state.trades);
   const position = ledger.positions.find((item) => item.code === code && item.accountType === accountType);
   const calculatedEdit = editTrade ? ledger.calculated.find((item) => item.id === editTrade.id) : null;
-  const maxQuantity = (position?.quantity ?? 0) + (editTrade?.quantity ?? 0);
-  const averagePrice = calculatedEdit?.averageCostAtSale ?? position?.averagePrice ?? 0;
+  const sameAccountType = !editTrade || accountTypeOf(editTrade) === accountType;
+  const maxQuantity = (position?.quantity ?? 0) + (editTrade && sameAccountType ? editTrade.quantity : 0);
+  const averagePrice = sameAccountType ? calculatedEdit?.averageCostAtSale ?? position?.averagePrice ?? 0 : position?.averagePrice ?? 0;
   state.form = { mode: editTrade ? "edit" : "new", action: "売却", editId: editTrade?.id ?? null, selected: { code, name: editTrade?.name ?? position?.name ?? "", market: editTrade?.market ?? position?.market ?? "" }, manual: false, sellContext: { maxQuantity, averagePrice } };
   $("#modal-kicker").textContent = editTrade ? "EDIT CLOSE" : "CLOSE POSITION";
   $("#modal-title").textContent = editTrade ? "売却記録を修正" : "売却記録を登録";
@@ -359,8 +431,7 @@ function openSell(code, style = "スイング", accountType = "現物", editTrad
   $("#fixed-security").classList.remove("hidden");
   $("#fixed-security").innerHTML = `<small>売却対象銘柄</small><strong>${esc(code)}　${esc(state.form.selected.name)}</strong><span>この売却登録では銘柄を変更できません</span>`;
   $("#trade-quantity").max = String(maxQuantity);
-  $("#account-type").value = accountType;
-  $("#account-type").disabled = true;
+  setAccountType(accountType, !editTrade);
   $("#quantity-helper").innerHTML = `上限 ${maxQuantity.toLocaleString()}株 <button id="fill-all" type="button">全株を入力</button>`;
   $("#calculation-note").className = "calculation-note sale full";
   updateSalePreview();
@@ -488,7 +559,7 @@ $("#security-query").addEventListener("focus", showSecurityOptions);
 $("#security-query").addEventListener("input", () => { state.form.selected = null; state.form.manual = false; $("#manual-fields").classList.add("hidden"); showSecurityOptions(); });
 $("#trade-price").addEventListener("input", updateSalePreview);
 $("#trade-quantity").addEventListener("input", updateSalePreview);
-$("#range-select").addEventListener("change", (event) => { state.range = event.target.value; render(); });
+
 $("#modal-backdrop").addEventListener("mousedown", (event) => { if (event.target === $("#modal-backdrop")) closeModal(); });
 document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !$("#modal-backdrop").classList.contains("hidden")) closeModal(); });
 document.addEventListener("click", async (event) => {
@@ -497,6 +568,15 @@ document.addEventListener("click", async (event) => {
   if (target.classList.contains("nav-item")) { switchView(target.dataset.view); return; }
   if (target.id === "fill-all") { $("#trade-quantity").value = state.form.sellContext.maxQuantity; updateSalePreview(); return; }
   const action = target.dataset.action;
+  if (action === "summary-filter") {
+    const key = target.dataset.filter;
+    if (["period", "style", "accountType"].includes(key)) {
+      state.summaryFilters[key] = target.dataset.value;
+      render();
+    }
+    return;
+  }
+  if (action === "account-type-choice") { chooseAccountType(target.dataset.value); return; }
   if (action === "view-records") switchView("records");
   if (action === "pnl-period") { state.pnlPeriod = target.dataset.period; renderRecords(calculateLedger(state.trades)); }
   if (action === "sell") openSell(target.dataset.code, target.dataset.style ?? "スイング", target.dataset.accountType ?? "現物", null, target.dataset.date ?? null);
@@ -520,7 +600,7 @@ onAuthStateChanged(auth, (user) => {
   }
   state.user = user;
   $("#login-screen").classList.add("hidden"); $("#app").classList.remove("hidden");
-  $("#range-select").value = state.range;
+
   switchView(state.activeView);
   subscribeTrades(user);
 });

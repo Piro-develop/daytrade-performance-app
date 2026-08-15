@@ -46,14 +46,6 @@
           <p id="page-subtitle" class="subtitle">デイトレ・スイングの振り返りと成績</p>
         </div>
         <div class="header-actions">
-          <label id="range-control" class="range-select">▣
-            <select id="range-select" aria-label="表示期間">
-              <option value="7">過去7日</option>
-              <option value="30" selected>過去30日</option>
-              <option value="90">過去90日</option>
-              <option value="all">全期間</option>
-            </select>
-          </label>
           <button id="open-buy" class="primary-button" type="button"><b>＋</b><span>買付を記録</span></button>
         </div>
       </header>
@@ -75,7 +67,13 @@
         <div class="form-grid">
           <label>取引日<input id="trade-date" type="date" required></label>
           <label>運用スタイル<select id="trade-style"><option>デイトレ</option><option>スイング</option></select></label>
-          <label>取引区分<select id="account-type"><option>現物</option><option>信用</option></select></label>
+          <div class="form-choice full"><span>取引区分</span>
+            <div id="account-type-switch" class="segmented-control" role="group" aria-label="取引区分">
+              <button class="active" data-action="account-type-choice" data-value="現物" type="button" aria-pressed="true">現物</button>
+              <button data-action="account-type-choice" data-value="信用" type="button" aria-pressed="false">信用</button>
+            </div>
+            <input id="account-type" type="hidden" value="現物">
+          </div>
 
           <label id="security-field" class="full">銘柄
             <span class="security-input-wrap">
