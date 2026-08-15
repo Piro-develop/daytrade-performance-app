@@ -39,7 +39,7 @@ const state = {
   securities: [],
   stocksAsOf: "",
   activeView: "overview",
-  summaryFilters: { period: "day", style: "all", accountType: "all" },
+  summaryFilters: { period: "all", style: "all", accountType: "all" },
   recordQuery: "",
   pnlPeriod: "day",
   pnlSelections: { day: localDate(), week: currentWeekStart(), month: localDate().slice(0, 7) },
@@ -187,15 +187,13 @@ function renderOverview(ledger, completed, stats) {
   $("#overview-view").innerHTML = `
     <section class="summary-filters" aria-label="サマリの集計条件">
       <div class="summary-filter-heading"><div><p class="section-kicker">SUMMARY FILTERS</p><h2>集計条件</h2></div><small>${filterLabel}</small></div>
-      ${summaryFilterGroup("period", "期間", [["day","今日"],["week","週"],["month","月"],["all","全期間"]])}
+      ${summaryFilterGroup("period", "期間", [["all","全期間"],["day","今日"],["week","週"],["month","月"]])}
       ${summaryFilterGroup("style", "取引スタイル", [["all","全て"],["デイトレ","デイトレ"],["スイング","スイング"]])}
       ${summaryFilterGroup("accountType", "取引区分", [["all","全て"],["現物","現物"],["信用","信用"]])}
     </section>
     <div class="stats-grid summary-stats-grid">
       <article class="stat-card breakdown-card"><div class="stat-top"><span>実現損益</span><i>円</i></div><div class="summary-breakdown">${profitSummary}</div></article>
-      ${metricCard("税引後損益", "税", metricYen(Math.trunc(stats.taxReference)), "利益に20.315％を適用した参考値", metricClass(stats.taxReference))}
       <article class="stat-card breakdown-card"><div class="stat-top"><span>勝率</span><i>◎</i></div><div class="summary-breakdown">${winSummary}</div></article>
-      ${metricCard("取引回数", "回", `${stats.saleCount.toLocaleString()}回`, "売却が完了した取引", stats.saleCount ? "positive" : "muted")}
       ${metricCard("PF", "⚖", Number.isFinite(stats.pf) ? stats.pf.toFixed(2) : "∞", "総利益 ÷ 総損失", stats.pf ? "positive" : "muted")}
       ${metricCard("平均利益", "＋", metricYen(stats.averageProfit), "利益になった取引の平均", metricClass(stats.averageProfit))}
       ${metricCard("平均損失", "−", metricYen(stats.averageLoss), "損失になった取引の平均", metricClass(stats.averageLoss))}
