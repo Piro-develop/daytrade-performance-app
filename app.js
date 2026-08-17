@@ -1,6 +1,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
 import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
+import { CREDIT_SETTINGS, CREDIT_TYPES, calculateCreditInterest, rateForCreditType } from "./credit-calculation.mjs";
 
 const firebaseConfig = {
   apiKey: "AIzaSyBcF8KJ6ltfl5yyL-5445h3u93Ej4hWtrk",
@@ -31,6 +32,13 @@ const afterTax = (profit) => profit > 0 ? profit * (1 - TAX_RATE) : profit;
 const normalize = (value) => String(value ?? "").normalize("NFKC").toLowerCase().replace(/[ァ-ヶ]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0x60)).replace(/[\s・（）()株式会社]/g, "");
 const byTimeAsc = (a, b) => a.date.localeCompare(b.date) || (a.createdAt ?? 0) - (b.createdAt ?? 0) || a.id.localeCompare(b.id);
 const accountTypeOf = (trade) => trade.accountType === "信用" ? "信用" : "現物";
+const creditTypeOf = (trade) => CREDIT_TYPES.includes(trade.creditType) ? trade.creditType : "";
+const creditTypeLabel = (trade) => {
+  if (accountTypeOf(trade) !== "信用") return "現物";
+  const types = trade.creditTypes ?? trade.applicableCreditTypes ?? (creditTypeOf(trade) ? [creditTypeOf(trade)] : []);
+  return types.length ? types.join("・") : "信用種別未設定";
+};
+const accountDetailLabel = (trade) => accountTypeOf(trade) === "信用" ? `信用・${creditTypeLabel(trade)}` : "現物";
 const positionKey = (code, accountType) => `${code}:${accountType}`;
 
 const state = {
@@ -44,7 +52,7 @@ const state = {
   pnlPeriod: "day",
   pnlSelections: { day: localDate(), week: currentWeekStart(), month: localDate().slice(0, 7) },
   unsubscribe: null,
-  form: { mode: "new", action: "買付", editId: null, selected: null, manual: false, sellContext: null }
+  form: { mode: "new", action: "買付", editId: null, selected: null, manual: false, sellContext: null, interestDayOverrides: {} }
 };
 
 const headings = {
@@ -64,33 +72,131 @@ function showToast(message) {
 
 function calculateLedger(trades) {
   const positions = new Map();
+  const creditLots = new Map();
   const results = new Map();
   let invalid = null;
   [...trades].sort(byTimeAsc).forEach((trade) => {
     const accountType = accountTypeOf(trade);
     const key = positionKey(trade.code, accountType);
-    const current = positions.get(key) ?? { code: trade.code, name: trade.name, market: trade.market ?? "", accountType, quantity: 0, averagePrice: 0 };
+    if (accountType === "信用") {
+      const lots = creditLots.get(key) ?? [];
+      if (trade.action === "買付") {
+        lots.push({
+          id: trade.id,
+          code: trade.code,
+          name: trade.name,
+          market: trade.market ?? "",
+          date: trade.date,
+          style: trade.style,
+          price: Number(trade.price),
+          remainingQuantity: Number(trade.quantity),
+          creditType: creditTypeOf(trade),
+          annualInterestRate: typeof trade.annualInterestRate === "number" && Number.isFinite(trade.annualInterestRate) ? trade.annualInterestRate : creditTypeOf(trade) ? rateForCreditType(creditTypeOf(trade)) : 0
+        });
+        creditLots.set(key, lots);
+        results.set(trade.id, { realisedProfit: null, grossProfitBeforeInterest: null, creditInterest: 0, averageCostAtSale: null, creditAllocations: [] });
+        return;
+      }
+
+      const available = lots.reduce((sum, lot) => sum + lot.remainingQuantity, 0);
+      if (trade.quantity > available) {
+        invalid ??= `${trade.date}の${trade.name}（信用）は、保有株数を${trade.quantity - available}株超えて売却しています。`;
+        results.set(trade.id, { realisedProfit: null, grossProfitBeforeInterest: null, creditInterest: 0, averageCostAtSale: null, creditAllocations: [] });
+        return;
+      }
+
+      let remaining = Number(trade.quantity);
+      let totalCost = 0;
+      let grossProfitBeforeInterest = 0;
+      let rawInterest = 0;
+      const allocations = [];
+      for (const lot of lots) {
+        if (remaining <= 0) break;
+        const quantity = Math.min(remaining, lot.remainingQuantity);
+        if (quantity <= 0) continue;
+        const overrideDays = trade.interestDayOverrides?.[lot.id] ?? null;
+        const interest = calculateCreditInterest({
+          openDate: lot.date,
+          closeDate: trade.date,
+          price: lot.price,
+          quantity,
+          creditType: lot.creditType,
+          annualRate: lot.annualInterestRate,
+          overrideDays
+        });
+        totalCost += lot.price * quantity;
+        grossProfitBeforeInterest += (Number(trade.price) - lot.price) * quantity;
+        rawInterest += interest.rawAmount;
+        allocations.push({
+          openingTradeId: lot.id,
+          openDate: lot.date,
+          openSettlementDate: interest.openSettlementDate,
+          closeSettlementDate: interest.closeSettlementDate,
+          openingPrice: lot.price,
+          quantity,
+          creditType: lot.creditType,
+          annualInterestRate: interest.appliedAnnualRate,
+          automaticInterestDays: interest.automaticDays,
+          interestDays: interest.interestDays,
+          manualOverride: interest.manualOverride,
+          interestAmount: interest.amount,
+          interestAmountRaw: interest.rawAmount,
+          calendarConfirmed: interest.calendarConfirmed
+        });
+        lot.remainingQuantity -= quantity;
+        remaining -= quantity;
+      }
+      const creditInterest = Math.floor(rawInterest + Number.EPSILON);
+      results.set(trade.id, {
+        realisedProfit: grossProfitBeforeInterest - creditInterest,
+        grossProfitBeforeInterest,
+        creditInterest,
+        averageCostAtSale: trade.quantity ? totalCost / trade.quantity : 0,
+        creditAllocations: allocations,
+        creditTypes: [...new Set(allocations.map((item) => item.creditType).filter(Boolean))]
+      });
+      return;
+    }
+
+    const current = positions.get(key) ?? { code: trade.code, name: trade.name, market: trade.market ?? "", accountType, style: trade.style, quantity: 0, averagePrice: 0 };
     if (trade.action === "買付") {
       const quantity = current.quantity + trade.quantity;
       const total = current.quantity * current.averagePrice + trade.quantity * trade.price;
-      positions.set(key, { ...current, name: trade.name, market: trade.market ?? current.market, quantity, averagePrice: total / quantity });
-      results.set(trade.id, { realisedProfit: null, averageCostAtSale: null });
+      positions.set(key, { ...current, name: trade.name, market: trade.market ?? current.market, style: current.quantity ? current.style : trade.style, quantity, averagePrice: total / quantity });
+      results.set(trade.id, { realisedProfit: null, grossProfitBeforeInterest: null, creditInterest: 0, averageCostAtSale: null, creditAllocations: [] });
       return;
     }
     if (trade.quantity > current.quantity) {
       invalid ??= `${trade.date}の${trade.name}（${accountType}）は、保有株数を${trade.quantity - current.quantity}株超えて売却しています。`;
-      results.set(trade.id, { realisedProfit: null, averageCostAtSale: null });
+      results.set(trade.id, { realisedProfit: null, grossProfitBeforeInterest: null, creditInterest: 0, averageCostAtSale: null, creditAllocations: [] });
       return;
     }
     const realisedProfit = (trade.price - current.averagePrice) * trade.quantity;
     const quantity = current.quantity - trade.quantity;
     positions.set(key, { ...current, quantity, averagePrice: quantity ? current.averagePrice : 0 });
-    results.set(trade.id, { realisedProfit, averageCostAtSale: current.averagePrice });
+    results.set(trade.id, { realisedProfit, grossProfitBeforeInterest: realisedProfit, creditInterest: 0, averageCostAtSale: current.averagePrice, creditAllocations: [] });
+  });
+  creditLots.forEach((lots, key) => {
+    const remainingLots = lots.filter((lot) => lot.remainingQuantity > 0);
+    if (!remainingLots.length) return;
+    const quantity = remainingLots.reduce((sum, lot) => sum + lot.remainingQuantity, 0);
+    const totalCost = remainingLots.reduce((sum, lot) => sum + lot.remainingQuantity * lot.price, 0);
+    const first = remainingLots[0];
+    positions.set(key, {
+      code: first.code,
+      name: first.name,
+      market: first.market,
+      accountType: "信用",
+      quantity,
+      style: first.style,
+      averagePrice: totalCost / quantity,
+      creditTypes: [...new Set(remainingLots.map((lot) => lot.creditType).filter(Boolean))]
+    });
   });
   return {
     invalid,
     positions: [...positions.values()].filter((position) => position.quantity > 0),
-    calculated: trades.map((trade) => ({ ...trade, accountType: accountTypeOf(trade), ...(results.get(trade.id) ?? { realisedProfit: null, averageCostAtSale: null }) }))
+    calculated: trades.map((trade) => ({ ...trade, accountType: accountTypeOf(trade), ...(results.get(trade.id) ?? { realisedProfit: null, grossProfitBeforeInterest: null, creditInterest: 0, averageCostAtSale: null, creditAllocations: [] }) }))
   };
 }
 
@@ -204,7 +310,7 @@ function renderOverview(ledger, completed, stats) {
     <div class="dashboard-grid">
       <article class="panel"><div class="panel-heading"><div><p class="section-kicker">PERFORMANCE</p><h2>累積実現損益</h2></div><span class="period-badge">${filterLabel}</span></div><div class="chart-wrap">${chartSvg(completed)}</div></article>
       <article class="panel"><div class="panel-heading"><div><p class="section-kicker">OPEN POSITIONS</p><h2>保有中の銘柄</h2></div><span class="period-badge">全保有 ${ledger.positions.length}件</span></div><div class="position-list">${ledger.positions.map((position) => `
-        <div class="position-row"><div><strong>${esc(position.code)} ${esc(position.name)}</strong><small>${esc(position.market)} ・ ${esc(position.accountType)} ・ 平均取得 ${yen(position.averagePrice, false)}</small></div><div class="position-actions"><strong>${position.quantity.toLocaleString()}株</strong><button class="sale-register-button" data-action="sell" data-code="${esc(position.code)}" data-account-type="${esc(position.accountType)}" type="button">売却記録を登録</button></div></div>`).join("") || '<div class="empty-state">現在の保有銘柄はありません</div>'}</div></article>
+        <div class="position-row"><div><strong>${esc(position.code)} ${esc(position.name)}</strong><small>${esc(position.market)} ・ ${esc(position.style)} ・ ${esc(position.accountType === "信用" ? `信用・${position.creditTypes?.length ? position.creditTypes.join("・") : "信用種別未設定"}` : "現物")} ・ 平均取得 ${yen(position.averagePrice, false)}</small></div><div class="position-actions"><strong>${position.quantity.toLocaleString()}株</strong><button class="sale-register-button" data-action="sell" data-code="${esc(position.code)}" data-style="${esc(position.style)}" data-account-type="${esc(position.accountType)}" type="button">売却記録を登録</button></div></div>`).join("") || '<div class="empty-state">現在の保有銘柄はありません</div>'}</div></article>
     </div>
     <article class="panel recent-panel"><div class="panel-heading"><div><p class="section-kicker">RECENT ACTIVITY</p><h2>条件内の直近売買</h2></div><button class="text-button" data-action="view-records" type="button">すべて見る ›</button></div><div class="trade-list compact">${recent.map((trade) => tradeCard(trade, positions)).join("") || '<div class="empty-state">選択した条件に該当する売買はありません</div>'}</div></article>`;
 }
@@ -213,7 +319,7 @@ function tradeCard(trade, positions) {
   const position = positions.get(positionKey(trade.code, accountType));
   const result = trade.realisedProfit === null ? (position ? "保有中" : "売却済み") : yen(trade.realisedProfit);
   const resultClass = trade.realisedProfit === null ? "muted" : trade.realisedProfit >= 0 ? "positive" : "negative";
-  return `<div class="trade-row"><span class="side-badge ${trade.action === "買付" ? "buy" : "sell"}">${trade.action === "買付" ? "BUY" : "SELL"}</span><div class="trade-main"><strong>${esc(trade.code)} ${esc(trade.name)}</strong><small>${trade.date.replaceAll("-", "/")} ・ ${esc(trade.style)} ・ ${esc(accountType)} ・ ${yen(trade.price, false)} × ${trade.quantity.toLocaleString()}株</small></div><div class="trade-result"><strong class="${resultClass}">${result}</strong>${trade.action === "買付" && position ? `<button class="sale-register-button" data-action="sell" data-code="${esc(trade.code)}" data-style="${esc(trade.style)}" data-account-type="${esc(accountType)}" data-date="${esc(trade.date)}" type="button">売却記録を登録</button>` : ""}</div></div>`;
+  return `<div class="trade-row"><span class="side-badge ${trade.action === "買付" ? "buy" : "sell"}">${trade.action === "買付" ? "BUY" : "SELL"}</span><div class="trade-main"><strong>${esc(trade.code)} ${esc(trade.name)}</strong><small>${trade.date.replaceAll("-", "/")} ・ ${esc(trade.style)} ・ ${esc(accountDetailLabel(trade))} ・ ${yen(trade.price, false)} × ${trade.quantity.toLocaleString()}株</small></div><div class="trade-result"><strong class="${resultClass}">${result}</strong>${trade.action === "買付" && position ? `<button class="sale-register-button" data-action="sell" data-code="${esc(trade.code)}" data-style="${esc(trade.style)}" data-account-type="${esc(accountType)}" data-date="${esc(trade.date)}" type="button">売却記録を登録</button>` : ""}</div></div>`;
 }
 
 function parseLocalDate(value) {
@@ -311,7 +417,7 @@ function renderRecords(ledger) {
     <div class="record-groups">${recordGroups.map((group) => `<section class="record-day"><h3>${japaneseDate(group.date)}</h3><div class="record-day-list">${group.trades.map((trade) => {
       const result = trade.action === "買付" ? "買付" : trade.realisedProfit === null ? "確認要" : yen(trade.realisedProfit);
       const resultClass = trade.action === "買付" ? "buy-text" : trade.realisedProfit === null ? "muted" : trade.realisedProfit >= 0 ? "positive" : "negative";
-      return `<div class="record-entry"><button class="record-entry-main" data-action="edit" data-id="${esc(trade.id)}" type="button"><span class="style-badge">${esc(trade.style)}</span><span class="record-security"><strong>${esc(trade.code)}</strong><span>${esc(trade.name)} ・ ${esc(accountTypeOf(trade))}</span></span><strong class="record-entry-result ${resultClass}">${result}</strong><span class="record-chevron">›</span></button><button class="record-delete" data-action="delete" data-id="${esc(trade.id)}" title="削除" type="button">削</button></div>`;
+      return `<div class="record-entry"><button class="record-entry-main" data-action="edit" data-id="${esc(trade.id)}" type="button"><span class="style-badge">${esc(trade.style)}</span><span class="record-security"><strong>${esc(trade.code)}</strong><span>${esc(trade.name)} ・ ${esc(accountDetailLabel(trade))}</span></span><strong class="record-entry-result ${resultClass}">${result}</strong><span class="record-chevron">›</span></button><button class="record-delete" data-action="delete" data-id="${esc(trade.id)}" title="削除" type="button">削</button></div>`;
     }).join("")}</div></section>`).join("") || `<div class="empty-state">該当する売買はありません</div>`}</div></div>`;
   const search = $("#record-search");
   search?.addEventListener("input", (event) => { state.recordQuery = event.target.value; renderRecords(calculateLedger(state.trades)); requestAnimationFrame(() => { const next = $("#record-search"); next?.focus(); next?.setSelectionRange(state.recordQuery.length, state.recordQuery.length); }); });
@@ -323,11 +429,11 @@ function renderAnalytics(ledger) {
   const stats = statsFor(completed);
   const score = completed.length ? Math.round(Math.max(0, Math.min(100, 45 + stats.winRate * .35 + Math.min(Number.isFinite(stats.pf) ? stats.pf : 4, 4) * 8))) : 0;
   const styleAmount = (style) => completed.filter((trade) => trade.style === style).reduce((sum, trade) => sum + trade.realisedProfit, 0);
-  $("#analytics-view").innerHTML = `<div class="analytics-layout"><article class="view-panel score-panel"><p class="section-kicker">TRADING SCORE</p><div class="score-ring"><span>${score}</span><small>/ 100</small></div><h2>${completed.length ? (score >= 70 ? "安定したパフォーマンス" : "改善余地があります") : "売却記録がありません"}</h2><p>売却済み取引だけを分析し、保有中の含み損益は含みません。</p></article><article class="view-panel"><div class="panel-heading"><div><p class="section-kicker">TRADE STYLE</p><h2>運用スタイル別の実現損益</h2></div></div><div class="style-results">${["デイトレ","スイング"].map((style) => { const amount=styleAmount(style); return `<div><span>${style}</span><strong class="${amount>=0?"positive":"negative"}">${yen(amount)}</strong><small>税引後参考 ${yen(completed.filter(t=>t.style===style).reduce((s,t)=>s+afterTax(t.realisedProfit),0))}</small></div>`; }).join("")}</div></article><article class="view-panel"><div class="panel-heading"><div><p class="section-kicker">INSIGHTS</p><h2>振り返りポイント</h2></div></div><div class="insight-list"><div><span>01</span><p><strong>売買を実際の約定単位で記録</strong><small>買付と売却を分け、売却時に損益を確定します。</small></p></div><div><span>02</span><p><strong>平均取得価格を自動更新</strong><small>追加購入も含めた加重平均で計算します。</small></p></div><div><span>03</span><p><strong>保有数超過を登録前に防止</strong><small>履歴の修正・削除時にも整合性を確認します。</small></p></div></div></article></div>`;
+  $("#analytics-view").innerHTML = `<div class="analytics-layout"><article class="view-panel score-panel"><p class="section-kicker">TRADING SCORE</p><div class="score-ring"><span>${score}</span><small>/ 100</small></div><h2>${completed.length ? (score >= 70 ? "安定したパフォーマンス" : "改善余地があります") : "売却記録がありません"}</h2><p>売却済み取引だけを分析し、信用取引は金利控除後の実現損益を使用します。</p></article><article class="view-panel"><div class="panel-heading"><div><p class="section-kicker">TRADE STYLE</p><h2>運用スタイル別の実現損益</h2></div></div><div class="style-results">${["デイトレ","スイング"].map((style) => { const amount=styleAmount(style); return `<div><span>${style}</span><strong class="${amount>=0?"positive":"negative"}">${yen(amount)}</strong><small>税引後 ${yen(completed.filter(t=>t.style===style).reduce((s,t)=>s+afterTax(t.realisedProfit),0))}</small></div>`; }).join("")}</div></article><article class="view-panel"><div class="panel-heading"><div><p class="section-kicker">INSIGHTS</p><h2>振り返りポイント</h2></div></div><div class="insight-list"><div><span>01</span><p><strong>売買を実際の約定単位で記録</strong><small>買付と売却を分け、売却時に損益を確定します。</small></p></div><div><span>02</span><p><strong>現物と信用を分けて計算</strong><small>現物は平均取得、信用は買付建玉を先入れ順で返済し金利を控除します。</small></p></div><div><span>03</span><p><strong>保有数超過を登録前に防止</strong><small>履歴の修正・削除時にも整合性を確認します。</small></p></div></div></article></div>`;
 }
 
 function renderSettings() {
-  $("#settings-view").innerHTML = `<div class="settings-layout"><article class="view-panel settings-card"><p class="section-kicker">ACCOUNT</p><h2>ログイン中のアカウント</h2><div class="setting-row"><span class="account-chip">${state.user.photoURL ? `<img src="${esc(state.user.photoURL)}" alt="">` : ""}<span><strong>${esc(state.user.displayName || "Googleユーザー")}</strong><small>${esc(state.user.email || "")}</small></span></span><button class="secondary-button" data-action="logout" type="button">ログアウト</button></div></article><article class="view-panel settings-card"><p class="section-kicker">CALCULATION</p><h2>計算設定</h2><div class="setting-row"><span><strong>実現損益</strong><small>（売却価格 − 平均取得価格）× 売却株数</small></span><span class="fixed-value">税引前を基本表示</span></div><div class="setting-row"><span><strong>税引後参考値</strong><small>利益に20.315％を単純適用。実際の損益通算・還付とは異なる場合があります。</small></span><span class="fixed-value">参考表示</span></div></article><article class="view-panel settings-card"><p class="section-kicker">DATA</p><h2>データ管理</h2><div class="setting-row"><span><strong>Firebase同期</strong><small>Googleログインしたご本人の端末間で自動同期</small></span><span class="fixed-value">接続済み</span></div><div class="setting-row"><span><strong>CSVバックアップ</strong><small>${state.trades.length}件の売買記録を書き出します</small></span><button class="secondary-button" data-action="csv" type="button">書き出す</button></div><p class="source-note">銘柄検索：JPX「東証上場銘柄一覧」${esc(state.stocksAsOf)}時点。プライム・スタンダード・グロースの国内普通株${state.securities.length.toLocaleString()}銘柄を収録。</p></article></div>`;
+  $("#settings-view").innerHTML = `<div class="settings-layout"><article class="view-panel settings-card"><p class="section-kicker">ACCOUNT</p><h2>ログイン中のアカウント</h2><div class="setting-row"><span class="account-chip">${state.user.photoURL ? `<img src="${esc(state.user.photoURL)}" alt="">` : ""}<span><strong>${esc(state.user.displayName || "Googleユーザー")}</strong><small>${esc(state.user.email || "")}</small></span></span><button class="secondary-button" data-action="logout" type="button">ログアウト</button></div></article><article class="view-panel settings-card"><p class="section-kicker">CALCULATION</p><h2>計算設定</h2><div class="setting-row"><span><strong>実現損益</strong><small>現物は従来の平均取得方式。信用は先に買った建玉から返済し、信用金利を控除します。</small></span><span class="fixed-value">税引前を基本表示</span></div><div class="setting-row"><span><strong>信用買い金利</strong><small>制度信用 2.80%／一般信用（無期限）2.80%／日計りは当日0%、持越し1.80%。受渡日T+2の両端入れ、365日割、円未満切捨て。</small></span><span class="fixed-value">買付時の率を保存</span></div><div class="setting-row"><span><strong>税引後損益</strong><small>金利控除後の利益に20.315％を単純適用。実際の損益通算・還付とは異なる場合があります。</small></span><span class="fixed-value">参考表示</span></div></article><article class="view-panel settings-card"><p class="section-kicker">DATA</p><h2>データ管理</h2><div class="setting-row"><span><strong>Firebase同期</strong><small>Googleログインしたご本人の端末間で自動同期</small></span><span class="fixed-value">接続済み</span></div><div class="setting-row"><span><strong>CSVバックアップ</strong><small>${state.trades.length}件の売買記録を書き出します</small></span><button class="secondary-button" data-action="csv" type="button">書き出す</button></div><p class="source-note">銘柄検索：JPX「東証上場銘柄一覧」${esc(state.stocksAsOf)}時点。信用金利の営業日カレンダーは2026・2027年のJPX休場日を収録し、その他の年は手動日数修正に対応。</p></article></div>`;
 }
 
 function switchView(view) {
@@ -341,6 +447,28 @@ function switchView(view) {
   $("#open-buy").classList.toggle("hidden", view === "settings");
 }
 
+function updateBuyCalculationNote() {
+  if (state.form.action !== "買付") return;
+  const isCredit = $("#account-type").value === "信用";
+  const creditType = $("#credit-type").value;
+  if (!isCredit || !creditType) {
+    $("#calculation-note").innerHTML = "<strong>買付後の保有に追加します</strong><small>現物は従来どおり平均取得価格を自動更新し、信用金利は発生しません。</small>";
+    return;
+  }
+  const rate = rateForCreditType(creditType) * 100;
+  const rateNote = creditType === "日計り信用" ? `当日返済 0%／持越し 年率${rate.toFixed(2)}%` : `年率${rate.toFixed(2)}%`;
+  $("#calculation-note").innerHTML = `<strong>${esc(creditType)} ・ ${rateNote}</strong><small>この適用金利を買付データに保存し、将来の設定変更による過去取引の書換えを防ぎます。</small>`;
+}
+
+function updateCreditTypeVisibility() {
+  const showCreditType = state.form.action === "買付" && $("#account-type").value === "信用";
+  $("#credit-type-field").classList.toggle("hidden", !showCreditType);
+  $("#credit-type").required = showCreditType;
+  if (showCreditType && state.form.mode === "new" && !$("#credit-type").value) $("#credit-type").value = "制度信用";
+  if (!showCreditType) $("#credit-type").required = false;
+  updateBuyCalculationNote();
+}
+
 function setAccountType(value = "現物", locked = false) {
   const selected = value === "信用" ? "信用" : "現物";
   $("#account-type").value = selected;
@@ -350,6 +478,7 @@ function setAccountType(value = "現物", locked = false) {
     button.setAttribute("aria-pressed", String(active));
     button.disabled = locked;
   });
+  updateCreditTypeVisibility();
 }
 
 function chooseAccountType(value) {
@@ -372,7 +501,7 @@ function chooseAccountType(value) {
 }
 
 function resetForm() {
-  state.form = { mode: "new", action: "買付", editId: null, selected: null, manual: false, sellContext: null };
+  state.form = { mode: "new", action: "買付", editId: null, selected: null, manual: false, sellContext: null, interestDayOverrides: {} };
   $("#trade-form").reset();
   $("#trade-date").value = localDate();
   $("#form-error").textContent = "";
@@ -381,8 +510,11 @@ function resetForm() {
   $("#security-field").classList.remove("hidden");
   $("#fixed-security").classList.add("hidden");
   $("#trade-quantity").removeAttribute("max");
+  $("#trade-style").disabled = false;
   setAccountType("現物");
   $("#sell-from-edit").classList.add("hidden");
+  $("#credit-interest-details").classList.add("hidden");
+  $("#credit-interest-details").innerHTML = "";
 }
 
 function openBuy(editTrade = null) {
@@ -395,7 +527,6 @@ function openBuy(editTrade = null) {
   $("#price-label").textContent = "取得価格";
   $("#save-trade").textContent = editTrade ? "修正を保存" : "買付を記録";
   $("#calculation-note").className = "calculation-note full";
-  $("#calculation-note").innerHTML = "<strong>買付後の保有に追加します</strong><small>同じ銘柄を保有中の場合は、平均取得価格を自動更新します。</small>";
   $("#quantity-helper").innerHTML = "";
   if (editTrade) {
     const found = state.securities.find((security) => security.code === editTrade.code);
@@ -404,11 +535,13 @@ function openBuy(editTrade = null) {
     $("#trade-date").value = editTrade.date;
     $("#trade-style").value = editTrade.style;
     setAccountType(accountTypeOf(editTrade));
+    $("#credit-type").value = creditTypeOf(editTrade);
     $("#trade-price").value = editTrade.price;
     $("#trade-quantity").value = editTrade.quantity;
     $("#trade-note").value = editTrade.note ?? "";
     if (calculateLedger(state.trades).positions.some((position) => position.code === editTrade.code && position.accountType === accountTypeOf(editTrade))) $("#sell-from-edit").classList.remove("hidden");
   }
+  updateCreditTypeVisibility();
   $("#modal-backdrop").classList.remove("hidden");
 }
 
@@ -420,40 +553,73 @@ function openSell(code, style = "スイング", accountType = "現物", editTrad
   const sameAccountType = !editTrade || accountTypeOf(editTrade) === accountType;
   const maxQuantity = (position?.quantity ?? 0) + (editTrade && sameAccountType ? editTrade.quantity : 0);
   const averagePrice = sameAccountType ? calculatedEdit?.averageCostAtSale ?? position?.averagePrice ?? 0 : position?.averagePrice ?? 0;
-  state.form = { mode: editTrade ? "edit" : "new", action: "売却", editId: editTrade?.id ?? null, selected: { code, name: editTrade?.name ?? position?.name ?? "", market: editTrade?.market ?? position?.market ?? "" }, manual: false, sellContext: { maxQuantity, averagePrice } };
+  state.form = { mode: editTrade ? "edit" : "new", action: "売却", editId: editTrade?.id ?? null, selected: { code, name: editTrade?.name ?? position?.name ?? "", market: editTrade?.market ?? position?.market ?? "" }, manual: false, sellContext: { maxQuantity, averagePrice }, interestDayOverrides: { ...(editTrade?.interestDayOverrides ?? {}) } };
   $("#modal-kicker").textContent = editTrade ? "EDIT CLOSE" : "CLOSE POSITION";
   $("#modal-title").textContent = editTrade ? "売却記録を修正" : "売却記録を登録";
   $("#price-label").textContent = "売却価格";
   $("#save-trade").textContent = editTrade ? "修正を保存" : "売却を記録";
   $("#security-field").classList.add("hidden");
   $("#fixed-security").classList.remove("hidden");
-  $("#fixed-security").innerHTML = `<small>売却対象銘柄</small><strong>${esc(code)}　${esc(state.form.selected.name)}</strong><span>この売却登録では銘柄を変更できません</span>`;
+  $("#fixed-security").innerHTML = `<small>売却対象銘柄</small><strong>${esc(code)}　${esc(state.form.selected.name)}</strong><span>銘柄・運用スタイル・取引区分は、買付時の内容から変更できません</span>`;
   $("#trade-quantity").max = String(maxQuantity);
-  setAccountType(accountType, !editTrade);
+  setAccountType(accountType, true);
   $("#quantity-helper").innerHTML = `上限 ${maxQuantity.toLocaleString()}株 <button id="fill-all" type="button">全株を入力</button>`;
   $("#calculation-note").className = "calculation-note sale full";
-  updateSalePreview();
   if (editTrade) {
     $("#trade-date").value = editTrade.date;
     $("#trade-style").value = editTrade.style;
     $("#trade-price").value = editTrade.price;
     $("#trade-quantity").value = editTrade.quantity;
     $("#trade-note").value = editTrade.note ?? "";
-    updateSalePreview();
   } else {
     $("#trade-style").value = style;
     if (defaultDate) $("#trade-date").value = defaultDate;
   }
+  $("#trade-style").disabled = true;
+  updateSalePreview();
   $("#modal-backdrop").classList.remove("hidden");
+}
+
+function salePreviewTrade(price, quantity) {
+  const existing = state.trades.find((trade) => trade.id === state.form.editId);
+  return { id: existing?.id ?? "pending-preview", code: state.form.selected.code, name: state.form.selected.name, market: state.form.selected.market ?? "", action: "売却", style: $("#trade-style").value, accountType: $("#account-type").value, date: $("#trade-date").value, price, quantity, interestDayOverrides: { ...state.form.interestDayOverrides }, createdAt: existing?.createdAt ?? Date.now() };
+}
+
+function renderCreditInterestDetails(calculated) {
+  const details = $("#credit-interest-details");
+  if ($("#account-type").value !== "信用" || !calculated?.creditAllocations?.length) {
+    details.classList.add("hidden");
+    details.innerHTML = "";
+    return;
+  }
+  const legacy = calculated.creditAllocations.some((item) => !item.creditType);
+  const estimatedCalendar = calculated.creditAllocations.some((item) => !item.calendarConfirmed);
+  details.classList.remove("hidden");
+  details.innerHTML = `<div class="credit-interest-heading"><strong>信用金利の内訳（先に買った建玉から返済）</strong><small>自動日数が証券会社の明細と異なる場合だけ、日数を上書きしてください。</small></div>${calculated.creditAllocations.map((item) => {
+    const override = state.form.interestDayOverrides[item.openingTradeId] ?? "";
+    const type = item.creditType || "種別未設定（既存データ・金利0%）";
+    return `<div class="credit-lot-row"><div><strong>${esc(item.openDate)} ・ ${item.quantity.toLocaleString()}株 ・ ${esc(type)}</strong><small>建単価 ${yen(item.openingPrice, false)} ／ 年率 ${(item.annualInterestRate * 100).toFixed(2)}% ／ 受渡 ${esc(item.openSettlementDate)}〜${esc(item.closeSettlementDate)}</small></div><label>金利日数<input data-interest-lot-id="${esc(item.openingTradeId)}" type="number" min="1" step="1" value="${esc(override)}" placeholder="自動 ${item.automaticInterestDays}日"><small>${item.manualOverride ? "手動設定" : `自動 ${item.automaticInterestDays}日`} ・ 約 ${yen(item.interestAmount, false)}</small></label></div>`;
+  }).join("")}${legacy ? '<p class="credit-warning">既存の信用買いに信用種別がないため、その建玉の金利は0円で維持しています。買付記録を編集して信用種別を設定すると計算対象になります。</p>' : ""}${estimatedCalendar ? '<p class="credit-warning">2026・2027年以外の休場日は推定です。SBI証券の取引明細と日数を照合し、必要に応じて手動修正してください。</p>' : ""}`;
 }
 
 function updateSalePreview() {
   if (state.form.action !== "売却" || !state.form.sellContext) return;
-  const { maxQuantity, averagePrice } = state.form.sellContext;
+  const { maxQuantity } = state.form.sellContext;
   const price = Number($("#trade-price").value);
   const quantity = Number($("#trade-quantity").value);
-  const profit = price > 0 && quantity > 0 ? (price - averagePrice) * quantity : null;
-  $("#calculation-note").innerHTML = `<span><small>売却可能株数</small><strong>${maxQuantity.toLocaleString()}株</strong></span><span><small>平均取得価格</small><strong>${yen(averagePrice,false)}</strong></span><span><small>実現損益見込み</small><strong class="${profit === null ? "muted" : profit >= 0 ? "positive" : "negative"}">${profit === null ? "価格・株数を入力" : yen(profit)}</strong>${profit === null ? "" : `<small>税引後参考 ${yen(afterTax(profit))}</small>`}</span>`;
+  let calculated = null;
+  if (price > 0 && Number.isInteger(quantity) && quantity > 0 && quantity <= maxQuantity && $("#trade-date").value) {
+    const draft = salePreviewTrade(price, quantity);
+    const candidate = state.form.mode === "edit" ? state.trades.map((trade) => trade.id === state.form.editId ? draft : trade) : [...state.trades, draft];
+    const preview = calculateLedger(candidate);
+    if (!preview.invalid) calculated = preview.calculated.find((trade) => trade.id === draft.id);
+  }
+  const averagePrice = calculated?.averageCostAtSale ?? state.form.sellContext.averagePrice;
+  const profit = calculated?.realisedProfit ?? null;
+  const gross = calculated?.grossProfitBeforeInterest ?? null;
+  const interest = calculated?.creditInterest ?? 0;
+  $("#calculation-note").innerHTML = `<span><small>売却可能株数</small><strong>${maxQuantity.toLocaleString()}株</strong></span><span><small>取得価格</small><strong>${yen(averagePrice,false)}</strong>${gross === null ? "" : `<small>金利控除前 ${yen(gross)}</small>`}</span><span><small>信用金利</small><strong>${yen(interest, false)}</strong></span><span><small>実現損益見込み</small><strong class="${profit === null ? "muted" : profit >= 0 ? "positive" : "negative"}">${profit === null ? "価格・株数を入力" : yen(profit)}</strong>${profit === null ? "" : `<small>税引後 ${yen(afterTax(profit))}</small>`}</span>`;
+  renderCreditInterestDetails(calculated);
 }
 
 function closeModal() { $("#modal-backdrop").classList.add("hidden"); resetForm(); }
@@ -485,14 +651,37 @@ async function saveTrade(event) {
   if (!(price > 0) || !Number.isInteger(quantity) || quantity < 1) { error.textContent = "価格は0より大きい数、株数は1以上の整数で入力してください。"; return; }
   const existing = state.trades.find((trade) => trade.id === state.form.editId);
   const formMode = state.form.mode;
-  const trade = { code: security.code, name: security.name, market: security.market ?? "", action: state.form.action, style: $("#trade-style").value, accountType: $("#account-type").value, date: $("#trade-date").value, price, quantity, note: $("#trade-note").value.trim(), createdAt: existing?.createdAt ?? Date.now(), updatedAt: Date.now() };
-  const candidate = state.form.mode === "edit" ? state.trades.map((item) => item.id === state.form.editId ? { ...trade, id: item.id } : item) : [...state.trades, { ...trade, id: `pending-${Date.now()}` }];
+  const accountType = $("#account-type").value;
+  const isCreditBuy = accountType === "信用" && state.form.action === "買付";
+  const isCreditSale = accountType === "信用" && state.form.action === "売却";
+  const creditType = isCreditBuy ? $("#credit-type").value : null;
+  if (isCreditBuy && !CREDIT_TYPES.includes(creditType)) { error.textContent = "信用種別を選択してください。"; return; }
+  const trade = {
+    code: security.code, name: security.name, market: security.market ?? "", action: state.form.action,
+    style: $("#trade-style").value, accountType, date: $("#trade-date").value, price, quantity,
+    creditType, annualInterestRate: isCreditBuy ? rateForCreditType(creditType) : null,
+    interestDayOverrides: isCreditSale ? { ...state.form.interestDayOverrides } : {},
+    interestCalculationMethod: isCreditSale ? CREDIT_SETTINGS.calculationMethod : null,
+    note: $("#trade-note").value.trim(), createdAt: existing?.createdAt ?? Date.now(), updatedAt: Date.now()
+  };
+  const candidateId = state.form.mode === "edit" ? state.form.editId : `pending-${Date.now()}`;
+  const candidate = state.form.mode === "edit" ? state.trades.map((item) => item.id === state.form.editId ? { ...trade, id: item.id } : item) : [...state.trades, { ...trade, id: candidateId }];
   const validation = calculateLedger(candidate);
   if (validation.invalid) { error.textContent = validation.invalid; return; }
+  const calculated = validation.calculated.find((item) => item.id === candidateId);
+  if (isCreditSale) trade.interestDayOverrides = Object.fromEntries((calculated?.creditAllocations ?? []).filter((item) => item.manualOverride).map((item) => [item.openingTradeId, item.interestDays]));
   button.disabled = true;
   try {
     const tradesRef = collection(db, "users", state.user.uid, "trades");
-    const payload = { ...trade, serverUpdatedAt: serverTimestamp() };
+    const payload = {
+      ...trade,
+      creditInterestAmount: calculated?.creditInterest ?? 0,
+      grossProfitBeforeInterest: calculated?.grossProfitBeforeInterest ?? null,
+      realisedProfitAfterInterest: calculated?.realisedProfit ?? null,
+      creditInterestAllocations: calculated?.creditAllocations ?? [],
+      applicableCreditTypes: calculated?.creditTypes ?? (creditType ? [creditType] : []),
+      serverUpdatedAt: serverTimestamp()
+    };
     if (formMode === "edit") await setDoc(doc(tradesRef, state.form.editId), payload, { merge: true });
     else await addDoc(tradesRef, payload);
     closeModal();
@@ -517,7 +706,7 @@ function exportCsv() {
   if (!state.trades.length) { showToast("書き出す売買記録がありません"); return; }
   const ledger = calculateLedger(state.trades);
   const quote = (value) => `"${String(value ?? "").replaceAll('"','""')}"`;
-  const rows = [["取引日","銘柄コード","銘柄名","市場","運用スタイル","取引区分","売買","約定価格","株数","実現損益（税引前）","税引後参考値","メモ"], ...[...ledger.calculated].sort(byTimeAsc).map((trade) => [trade.date,trade.code,trade.name,trade.market,trade.style,accountTypeOf(trade),trade.action,trade.price,trade.quantity,trade.realisedProfit ?? "",trade.realisedProfit === null ? "" : Math.round(afterTax(trade.realisedProfit)),trade.note ?? ""])];
+  const rows = [["取引日","銘柄コード","銘柄名","市場","運用スタイル","取引区分","信用種別","売買","約定価格","株数","金利控除前損益","信用金利","実現損益（税引前）","税引後損益","メモ"], ...[...ledger.calculated].sort(byTimeAsc).map((trade) => [trade.date,trade.code,trade.name,trade.market,trade.style,accountTypeOf(trade),creditTypeLabel(trade),trade.action,trade.price,trade.quantity,trade.grossProfitBeforeInterest ?? "",trade.creditInterest ?? 0,trade.realisedProfit ?? "",trade.realisedProfit === null ? "" : Math.round(afterTax(trade.realisedProfit)),trade.note ?? ""])];
   const blob = new Blob(["\uFEFF" + rows.map((row) => row.map(quote).join(",")).join("\r\n")], { type: "text/csv;charset=utf-8" });
   const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `売買記録_${localDate()}.csv`; link.click(); URL.revokeObjectURL(link.href); showToast("CSVを書き出しました");
 }
@@ -556,6 +745,17 @@ $("#trade-form").addEventListener("submit", saveTrade);
 $("#security-query").addEventListener("focus", showSecurityOptions);
 $("#security-query").addEventListener("input", () => { state.form.selected = null; state.form.manual = false; $("#manual-fields").classList.add("hidden"); showSecurityOptions(); });
 $("#trade-price").addEventListener("input", updateSalePreview);
+$("#credit-type").addEventListener("change", updateBuyCalculationNote);
+$("#trade-date").addEventListener("change", updateSalePreview);
+$("#credit-interest-details").addEventListener("change", (event) => {
+  const input = event.target.closest("[data-interest-lot-id]");
+  if (!input) return;
+  const value = Number(input.value);
+  if (input.value === "" || !Number.isInteger(value) || value < 1) delete state.form.interestDayOverrides[input.dataset.interestLotId];
+  else state.form.interestDayOverrides[input.dataset.interestLotId] = value;
+  updateSalePreview();
+});
+
 $("#trade-quantity").addEventListener("input", updateSalePreview);
 
 $("#modal-backdrop").addEventListener("mousedown", (event) => { if (event.target === $("#modal-backdrop")) closeModal(); });

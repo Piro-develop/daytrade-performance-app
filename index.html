@@ -9,6 +9,7 @@
   <link rel="apple-touch-icon" sizes="180x180" href="./assets/icons/apple-touch-icon-180.png">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./credit-styles.css">
 </head>
 <body>
   <div id="boot" class="boot-screen"><div class="spinner"></div><p>アプリを準備しています…</p></div>
@@ -74,6 +75,15 @@
             </div>
             <input id="account-type" type="hidden" value="現物">
           </div>
+          <label id="credit-type-field" class="full hidden">信用種別
+            <select id="credit-type">
+              <option value="">選択してください</option>
+              <option value="制度信用">制度信用</option>
+              <option value="一般信用（無期限）">一般信用（無期限）</option>
+              <option value="日計り信用">日計り信用</option>
+            </select>
+            <small class="field-help">信用買いの建玉ごとに保存し、返済売り時の金利計算に使用します。</small>
+          </label>
 
           <label id="security-field" class="full">銘柄
             <span class="security-input-wrap">
@@ -91,6 +101,7 @@
           <label>株数<input id="trade-quantity" inputmode="numeric" type="number" min="1" step="1" placeholder="100" required><span id="quantity-helper" class="quantity-helper"></span></label>
 
           <div id="calculation-note" class="calculation-note full"></div>
+          <div id="credit-interest-details" class="credit-interest-details full hidden"></div>
           <p id="form-error" class="error-message full" role="alert"></p>
           <label class="full">振り返りメモ<textarea id="trade-note" placeholder="売買の根拠・良かった点・改善点など"></textarea></label>
         </div>
