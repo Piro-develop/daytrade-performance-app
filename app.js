@@ -541,11 +541,16 @@ function openPositionBuyEditor(code, accountType) {
   const lots = openingLotsForPosition(state.trades, code, accountType);
   if (!lots.length) { showToast("編集できる買付記録が見つかりませんでした"); return; }
   if (lots.length === 1) { openBuy(lots[0].trade); return; }
+  $("#position-lot-description").textContent = accountType === "現物"
+    ? "現物は平均取得単価で管理するため、買付ごとの残株数は表示しません。現在の保有サイクル内の買付記録を表示しています。"
+    : "この保有を構成している信用建玉です。確認・編集する買付記録を選んでください。";
   const first = lots[0].trade;
   $("#position-lot-title").textContent = `${first.code} ${first.name}`;
   $("#position-lot-list").innerHTML = lots.map(({ trade, remainingQuantity }) => {
-    const creditDetail = accountTypeOf(trade) === "信用" ? ` ・ ${creditTypeOf(trade) || "信用種別未設定"} ・ ${custodyTypeOf(trade)}` : "";
-    return `<button class="position-lot-choice" data-action="edit-position-lot" data-id="${esc(trade.id)}" type="button"><span><strong>${esc(japaneseDate(trade.date))}</strong><small>${esc(accountTypeOf(trade))}${esc(creditDetail)} ・ 買付 ${yen(trade.price, false)} × ${Number(trade.quantity).toLocaleString()}株</small></span><span><strong>残り ${remainingQuantity.toLocaleString()}株</strong><i aria-hidden="true">›</i></span></button>`;
+    const isCredit = accountTypeOf(trade) === "信用";
+    const creditDetail = isCredit ? ` ・ ${creditTypeOf(trade) || "信用種別未設定"} ・ ${custodyTypeOf(trade)}` : "";
+    const choiceState = isCredit ? `<strong>残り ${remainingQuantity.toLocaleString()}株</strong>` : "<strong>買付記録</strong>";
+    return `<button class="position-lot-choice" data-action="edit-position-lot" data-id="${esc(trade.id)}" type="button"><span><strong>${esc(japaneseDate(trade.date))}</strong><small>${esc(accountTypeOf(trade))} ・ ${esc(trade.style)}${esc(creditDetail)} ・ 買付 ${yen(trade.price, false)} × ${Number(trade.quantity).toLocaleString()}株</small></span><span>${choiceState}<i aria-hidden="true">›</i></span></button>`;
   }).join("");
   $("#position-lot-backdrop").classList.remove("hidden");
 }

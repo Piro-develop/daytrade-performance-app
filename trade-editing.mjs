@@ -4,12 +4,12 @@ const byTimeAsc = (a, b) => String(a.date).localeCompare(String(b.date))
   || (a.createdAt ?? 0) - (b.createdAt ?? 0)
   || String(a.id).localeCompare(String(b.id));
 
-function createUsage(trade) {
+function createCreditUsage(trade) {
   const quantity = Number(trade.quantity);
   return {
     trade,
     openingTradeId: trade.id,
-    accountType: accountTypeOf(trade),
+    accountType: "信用",
     originalQuantity: quantity,
     committedQuantity: 0,
     remainingQuantity: quantity
@@ -22,7 +22,7 @@ function useQuantity(lot, quantity) {
   lot.remainingQuantity -= used;
 }
 
-function useOldestLots(lots, quantity) {
+function useOldestCreditLots(lots, quantity) {
   let remaining = Math.max(0, Number(quantity) || 0);
   for (const lot of lots) {
     if (remaining <= 0) break;
@@ -35,34 +35,12 @@ function useOldestLots(lots, quantity) {
 
 export function openingTradeUsage(trades) {
   const usage = new Map();
-  const spotByCodeAndDate = new Map();
-
-  [...trades].filter((trade) => accountTypeOf(trade) === "現物").sort(byTimeAsc).forEach((trade) => {
-    const dates = spotByCodeAndDate.get(trade.code) ?? new Map();
-    const day = dates.get(trade.date) ?? [];
-    day.push(trade);
-    dates.set(trade.date, day);
-    spotByCodeAndDate.set(trade.code, dates);
-  });
-
-  spotByCodeAndDate.forEach((dates) => {
-    const lots = [];
-    dates.forEach((dayTrades) => {
-      const sorted = [...dayTrades].sort(byTimeAsc);
-      sorted.filter((trade) => trade.action === "買付").forEach((trade) => {
-        const lot = createUsage(trade);
-        usage.set(trade.id, lot);
-        lots.push(lot);
-      });
-      sorted.filter((trade) => trade.action === "売却").forEach((trade) => useOldestLots(lots, trade.quantity));
-    });
-  });
-
   const creditLotsByCode = new Map();
+
   [...trades].filter((trade) => accountTypeOf(trade) === "信用").sort(byTimeAsc).forEach((trade) => {
     const lots = creditLotsByCode.get(trade.code) ?? [];
     if (trade.action === "買付") {
-      const lot = createUsage(trade);
+      const lot = createCreditUsage(trade);
       usage.set(trade.id, lot);
       lots.push(lot);
       creditLotsByCode.set(trade.code, lots);
@@ -76,21 +54,58 @@ export function openingTradeUsage(trades) {
       });
       return;
     }
-    useOldestLots(lots, trade.quantity);
+    useOldestCreditLots(lots, trade.quantity);
   });
 
   return usage;
 }
 
+export function spotOpeningTradesForCurrentCycle(trades, code) {
+  const dates = new Map();
+  [...trades]
+    .filter((trade) => accountTypeOf(trade) === "現物" && trade.code === code)
+    .sort(byTimeAsc)
+    .forEach((trade) => {
+      const day = dates.get(trade.date) ?? [];
+      day.push(trade);
+      dates.set(trade.date, day);
+    });
+
+  let holdingQuantity = 0;
+  let cycleBuys = [];
+  dates.forEach((dayTrades) => {
+    const sorted = [...dayTrades].sort(byTimeAsc);
+    const buys = sorted.filter((trade) => trade.action === "買付");
+    const sales = sorted.filter((trade) => trade.action === "売却");
+    if (holdingQuantity === 0) cycleBuys = [];
+    cycleBuys.push(...buys);
+    holdingQuantity += buys.reduce((sum, trade) => sum + Number(trade.quantity), 0);
+    holdingQuantity -= sales.reduce((sum, trade) => sum + Number(trade.quantity), 0);
+    if (holdingQuantity <= 0) cycleBuys = [];
+  });
+  return holdingQuantity > 0 ? cycleBuys : [];
+}
+
 export function openingLotsForPosition(trades, code, accountType) {
+  if (accountType === "現物") {
+    return spotOpeningTradesForCurrentCycle(trades, code).map((trade) => ({
+      trade,
+      openingTradeId: trade.id,
+      accountType: "現物",
+      originalQuantity: Number(trade.quantity),
+      committedQuantity: null,
+      remainingQuantity: null
+    }));
+  }
   return [...openingTradeUsage(trades).values()]
-    .filter((lot) => lot.trade.code === code && lot.accountType === accountType && lot.remainingQuantity > 0)
+    .filter((lot) => lot.trade.code === code && lot.remainingQuantity > 0)
     .sort((a, b) => byTimeAsc(a.trade, b.trade));
 }
 
 export function openingQuantityChangeError(trades, openingTradeId, nextQuantity) {
+  const openingTrade = trades.find((trade) => trade.id === openingTradeId);
+  if (!openingTrade || accountTypeOf(openingTrade) !== "信用") return "";
   const lot = openingTradeUsage(trades).get(openingTradeId);
   if (!lot || Number(nextQuantity) >= lot.committedQuantity) return "";
-  const completedLabel = lot.accountType === "信用" ? "返済" : "売却";
-  return `すでに${lot.committedQuantity.toLocaleString()}株${completedLabel}済みのため、買付株数を${lot.committedQuantity.toLocaleString()}株未満には変更できません。`;
+  return `すでに${lot.committedQuantity.toLocaleString()}株返済済みのため、買付株数を${lot.committedQuantity.toLocaleString()}株未満には変更できません。`;
 }
