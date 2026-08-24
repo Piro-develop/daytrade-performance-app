@@ -17,6 +17,7 @@ import {
 
 const appSource = await readFile(new URL("../app.js", import.meta.url), "utf8");
 const indexSource = await readFile(new URL("../index.html", import.meta.url), "utf8");
+const allocationSource = await readFile(new URL("../position-allocation.mjs", import.meta.url), "utf8");
 const ledgerSource = appSource.slice(appSource.indexOf("function calculateLedger"), appSource.indexOf("function summaryPeriodStart"));
 const calculationUrl = new URL("../credit-calculation.mjs", import.meta.url).href;
 const spotUrl = new URL("../spot-calculation.mjs", import.meta.url).href;
@@ -263,6 +264,75 @@ test("保存後の再読込でも建玉指定と証券会社実績値を維持",
   assert.equal(sale.creditAllocations[0].openingTradeId, "b1");
 });
 
+test("ケース1: 連続返済は前の確定数量を消化した残建玉から割り当てる", () => {
+  const buys = [
+    trade("b1", "買付", "2026-08-01", 1000, 5000, { accountType: "信用", creditType: "制度信用", custodyType: "特定" }),
+    trade("b2", "買付", "2026-08-02", 1100, 2000, { accountType: "信用", creditType: "制度信用", custodyType: "特定" })
+  ];
+  const firstAllocations = automaticPositionAllocations(calculateLedger(buys).openCreditLots, 500, "profit", { fallbackPrice: 1200 });
+  const first = trade("s1", "売却", "2026-08-10", 1200, 500, { accountType: "信用", positionAllocations: firstAllocations, allocationMethod: "profit", allocationConfirmed: true });
+  const afterFirst = calculateLedger([...buys, first]);
+  const secondAllocations = automaticPositionAllocations(afterFirst.openCreditLots, 500, "profit", { fallbackPrice: 1200 });
+  const second = trade("s2", "売却", "2026-08-10", 1200, 500, { accountType: "信用", positionAllocations: secondAllocations, allocationMethod: "profit", allocationConfirmed: true });
+  const finalLedger = calculateLedger([...buys, first, second]);
+
+  assert.deepEqual(firstAllocations, [{ openingTradeId: "b1", quantity: 500 }]);
+  assert.equal(afterFirst.openCreditLots.find((lot) => lot.id === "b1").remainingQuantity, 4500);
+  assert.deepEqual(secondAllocations, [{ openingTradeId: "b1", quantity: 500 }]);
+  assert.equal(finalLedger.openCreditLots.find((lot) => lot.id === "b1").remainingQuantity, 4000);
+});
+
+test("ケース2: 先順位の残株を使い切ってから次順位の建玉へ進む", () => {
+  const buys = [
+    trade("b1", "買付", "2026-08-01", 1000, 1000, { accountType: "信用", creditType: "制度信用", custodyType: "特定" }),
+    trade("b2", "買付", "2026-08-02", 1100, 2000, { accountType: "信用", creditType: "制度信用", custodyType: "特定" })
+  ];
+  const firstAllocations = automaticPositionAllocations(calculateLedger(buys).openCreditLots, 800, "profit", { fallbackPrice: 1200 });
+  const first = trade("s1", "売却", "2026-08-10", 1200, 800, { accountType: "信用", positionAllocations: firstAllocations, allocationMethod: "profit", allocationConfirmed: true });
+  const afterFirst = calculateLedger([...buys, first]);
+  const secondAllocations = automaticPositionAllocations(afterFirst.openCreditLots, 500, "profit", { fallbackPrice: 1200 });
+
+  assert.deepEqual(firstAllocations, [{ openingTradeId: "b1", quantity: 800 }]);
+  assert.deepEqual(secondAllocations, [
+    { openingTradeId: "b1", quantity: 200 },
+    { openingTradeId: "b2", quantity: 300 }
+  ]);
+});
+
+test("ケース3・4: 同じ約定価格でも登録順を使い、先の確定割当を変えない", () => {
+  const buys = [
+    trade("b1", "買付", "2026-08-01", 1000, 1000, { accountType: "信用", creditType: "制度信用", custodyType: "特定" }),
+    trade("b2", "買付", "2026-08-02", 1100, 2000, { accountType: "信用", creditType: "制度信用", custodyType: "特定" })
+  ];
+  const firstAllocations = automaticPositionAllocations(calculateLedger(buys).openCreditLots, 800, "profit", { fallbackPrice: 1250 });
+  const first = trade("s1", "売却", "2026-08-10", 1250, 800, { accountType: "信用", positionAllocations: firstAllocations, allocationMethod: "profit", allocationConfirmed: true, createdAt: 100 });
+  const afterFirst = calculateLedger([...buys, first]);
+  const secondAllocations = automaticPositionAllocations(afterFirst.openCreditLots, 500, "profit", { fallbackPrice: 1250 });
+  const second = trade("s2", "売却", "2026-08-10", 1250, 500, { accountType: "信用", positionAllocations: secondAllocations, allocationMethod: "profit", allocationConfirmed: true, createdAt: 200 });
+  const finalLedger = calculateLedger([...buys, second, first]);
+  const confirmedFirst = finalLedger.calculated.find((item) => item.id === "s1");
+  const confirmedSecond = finalLedger.calculated.find((item) => item.id === "s2");
+
+  assert.deepEqual(confirmedFirst.positionAllocations, [{ openingTradeId: "b1", quantity: 800 }]);
+  assert.deepEqual(confirmedFirst.creditAllocations.map((item) => [item.openingTradeId, item.quantity]), [["b1", 800]]);
+  assert.deepEqual(confirmedSecond.creditAllocations.map((item) => [item.openingTradeId, item.quantity]), [["b1", 200], ["b2", 300]]);
+});
+
+test("ケース5: 手動指定済み返済は後続の自動返済で変更しない", () => {
+  const buys = [
+    trade("b1", "買付", "2026-08-01", 1000, 1000, { accountType: "信用", creditType: "制度信用", custodyType: "特定" }),
+    trade("b2", "買付", "2026-08-02", 1100, 2000, { accountType: "信用", creditType: "制度信用", custodyType: "特定" })
+  ];
+  const first = trade("s1", "売却", "2026-08-10", 1200, 500, { accountType: "信用", positionAllocations: [{ openingTradeId: "b2", quantity: 500 }], allocationMethod: "manual", allocationConfirmed: true });
+  const afterFirst = calculateLedger([...buys, first]);
+  const secondAllocations = automaticPositionAllocations(afterFirst.openCreditLots, 500, "profit", { fallbackPrice: 1200 });
+  const second = trade("s2", "売却", "2026-08-11", 1200, 500, { accountType: "信用", positionAllocations: secondAllocations, allocationMethod: "profit", allocationConfirmed: true });
+  const finalLedger = calculateLedger([...buys, first, second]);
+
+  assert.deepEqual(finalLedger.calculated.find((item) => item.id === "s1").positionAllocations, [{ openingTradeId: "b2", quantity: 500 }]);
+  assert.deepEqual(finalLedger.calculated.find((item) => item.id === "s2").creditAllocations.map((item) => [item.openingTradeId, item.quantity]), [["b1", 500]]);
+});
+
 test("既存の信用返済は従来計算を維持し未確認として扱う", () => {
   const ledger = calculateLedger([
     trade("b1", "買付", "2026-08-03", 1000, 100, { accountType: "信用" }),
@@ -289,6 +359,9 @@ test("建玉指定UI・実績値入力・スマホ向け部品を備える", () 
   assert.match(appSource, /data-position-lot-id/);
   assert.match(appSource, /brokerActuals/);
   assert.match(appSource, /positionAllocations/);
+  assert.match(appSource, /SBIで安い指値から発注した順に1注文ずつ登録してください/);
+  assert.match(appSource, /売却価格には実際の約定価格を入力します/);
+  assert.doesNotMatch(`${appSource}\n${allocationSource}`, /pendingRepaymentQuantity|orderedQuantity|SBI注文中株数|未約定注文数量/);
   assert.match(appSource, /allocation-evaluation-price/);
   assert.match(appSource, /data-evaluation-profit-lot-id/);
   assert.match(appSource, /repaymentGroup/);
