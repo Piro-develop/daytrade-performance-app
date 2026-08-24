@@ -293,6 +293,7 @@ test("建玉指定UI・実績値入力・スマホ向け部品を備える", () 
   assert.match(appSource, /data-evaluation-profit-lot-id/);
   assert.match(appSource, /repaymentGroup/);
   assert.match(appSource, /custodyType/);
+  assert.match(appSource, /\$\("#custody-type"\)\.value = "特定"/);
   assert.match(appSource, /税引後損益（概算）/);
   assert.match(indexSource, /id="custody-type"/);
   assert.match(indexSource, /id="transaction-fee"/);
