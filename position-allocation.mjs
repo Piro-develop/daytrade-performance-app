@@ -6,13 +6,15 @@ export const ALLOCATION_METHODS = Object.freeze({
   manual: "手動指定"
 });
 
-const byOldest = (a, b) => a.date.localeCompare(b.date) || (a.createdAt ?? 0) - (b.createdAt ?? 0) || a.id.localeCompare(b.id);
+const byCreated = (a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0) || a.id.localeCompare(b.id);
+const byOldest = (a, b) => a.date.localeCompare(b.date) || byCreated(a, b);
+const byBuildDate = (a, b) => a.date.localeCompare(b.date);
 const unitProfit = (lot, salePrice) => Number(salePrice) - Number(lot.price);
 
 export function sortCreditLots(lots, method, salePrice) {
   const sorted = [...lots];
   if (method === "newest") {
-    return sorted.sort((a, b) => -byOldest(a, b) || unitProfit(b, salePrice) - unitProfit(a, salePrice));
+    return sorted.sort((a, b) => -byBuildDate(a, b) || unitProfit(b, salePrice) - unitProfit(a, salePrice) || byCreated(a, b));
   }
   if (method === "profit") {
     return sorted.sort((a, b) => unitProfit(b, salePrice) - unitProfit(a, salePrice) || byOldest(a, b));
@@ -20,7 +22,7 @@ export function sortCreditLots(lots, method, salePrice) {
   if (method === "loss") {
     return sorted.sort((a, b) => unitProfit(a, salePrice) - unitProfit(b, salePrice) || byOldest(a, b));
   }
-  return sorted.sort((a, b) => byOldest(a, b) || unitProfit(b, salePrice) - unitProfit(a, salePrice));
+  return sorted.sort((a, b) => byBuildDate(a, b) || unitProfit(b, salePrice) - unitProfit(a, salePrice) || byCreated(a, b));
 }
 
 export function automaticPositionAllocations(lots, totalQuantity, method = "oldest", salePrice = 0) {

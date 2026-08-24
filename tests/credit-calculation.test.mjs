@@ -186,6 +186,12 @@ test("自動選択は古い順・新しい順・利益順・損失順を使い�
   assert.equal(automaticPositionAllocations(lots, 50, "profit", 1100)[0].openingTradeId, "profit");
   assert.equal(automaticPositionAllocations(lots, 50, "loss", 1100)[0].openingTradeId, "loss");
   assert.deepEqual(sortCreditLots(lots, "oldest", 1100).map((lot) => lot.id), ["old", "loss", "profit"]);
+  const sameDate = [
+    { id: "lower", date: "2026-08-05", createdAt: 1, price: 1000, remainingQuantity: 100 },
+    { id: "higher", date: "2026-08-05", createdAt: 2, price: 900, remainingQuantity: 100 }
+  ];
+  assert.equal(automaticPositionAllocations(sameDate, 50, "oldest", 1100)[0].openingTradeId, "higher");
+  assert.equal(automaticPositionAllocations(sameDate, 50, "newest", 1100)[0].openingTradeId, "higher");
 });
 
 test("自動選択後の手動修正を保存用配列へ変換", () => {
