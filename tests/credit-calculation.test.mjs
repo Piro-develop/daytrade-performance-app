@@ -19,8 +19,12 @@ const appSource = await readFile(new URL("../app.js", import.meta.url), "utf8");
 const indexSource = await readFile(new URL("../index.html", import.meta.url), "utf8");
 const ledgerSource = appSource.slice(appSource.indexOf("function calculateLedger"), appSource.indexOf("function summaryPeriodStart"));
 const calculationUrl = new URL("../credit-calculation.mjs", import.meta.url).href;
+const spotUrl = new URL("../spot-calculation.mjs", import.meta.url).href;
+const taxUrl = new URL("../tax-calculation.mjs", import.meta.url).href;
 const ledgerModule = `
   import { CREDIT_TYPES, calculateCreditInterest, rateForCreditType } from ${JSON.stringify(calculationUrl)};
+  import { calculateSpotLedger } from ${JSON.stringify(spotUrl)};
+  import { calculateAnnualTaxEstimates } from ${JSON.stringify(taxUrl)};
   const accountTypeOf = (trade) => trade.accountType === "信用" ? "信用" : "現物";
   const creditTypeOf = (trade) => CREDIT_TYPES.includes(trade.creditType) ? trade.creditType : "";
   const CUSTODY_TYPES = ["特定", "一般"];
@@ -38,7 +42,7 @@ const trade = (id, action, date, price, quantity, extra = {}) => ({
   id, action, date, price, quantity, code: "9999", name: "テスト", market: "東証", style: "デイトレ", createdAt: Number(id.replace(/\D/g, "")) || 0, ...extra
 });
 
-test("現物は従来どおり平均取得価格で計算し金利は0円", () => {
+test("現物はSBI税務取得単価で計算し金利は0円", () => {
   const ledger = calculateLedger([
     trade("c1", "買付", "2026-08-03", 1000, 100, { accountType: "現物" }),
     trade("c2", "買付", "2026-08-04", 1200, 100, { accountType: "現物" }),
@@ -289,7 +293,9 @@ test("建玉指定UI・実績値入力・スマホ向け部品を備える", () 
   assert.match(appSource, /data-evaluation-profit-lot-id/);
   assert.match(appSource, /repaymentGroup/);
   assert.match(appSource, /custodyType/);
-  assert.match(appSource, /税引後概算/);
+  assert.match(appSource, /税引後損益（概算）/);
   assert.match(indexSource, /id="custody-type"/);
+  assert.match(indexSource, /id="transaction-fee"/);
+  assert.match(appSource, /transactionFee/);
   assert.match(indexSource, /特定/);
 });
