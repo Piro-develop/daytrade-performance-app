@@ -134,6 +134,17 @@
     </section>
   </div>
 
+  <div id="position-lot-backdrop" class="modal-backdrop hidden" role="presentation">
+    <section class="trade-modal position-lot-modal" role="dialog" aria-modal="true" aria-labelledby="position-lot-title">
+      <div class="modal-header">
+        <div><p class="section-kicker">OPENING TRADES</p><h2 id="position-lot-title">買付記録を選択</h2></div>
+        <button class="close-button" data-action="close-position-lots" type="button" aria-label="閉じる">×</button>
+      </div>
+      <p class="position-lot-description">この保有を構成している買付記録です。確認・編集する記録を選んでください。</p>
+      <div id="position-lot-list" class="position-lot-list"></div>
+    </section>
+  </div>
+
   <div id="toast" class="toast hidden" role="status"></div>
   <script type="module" src="./app.js"></script>
 </body>

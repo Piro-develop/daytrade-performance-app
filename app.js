@@ -5,6 +5,7 @@ import { CREDIT_SETTINGS, CREDIT_TYPES, calculateCreditInterest, rateForCreditTy
 import { ALLOCATION_METHODS, ALLOCATION_SETTINGS, allocationArrayToObject, allocationObjectToArray, automaticPositionAllocations, creditLotEvaluation } from "./position-allocation.mjs";
 import { calculateSpotLedger, transactionFeeOf } from "./spot-calculation.mjs";
 import { TAX_SETTINGS, calculateAnnualTaxEstimates, estimatedAfterTaxForTrades } from "./tax-calculation.mjs";
+import { openingLotsForPosition, openingQuantityChangeError } from "./trade-editing.mjs";
 
 const firebaseConfig = {
   apiKey: "AIzaSyBcF8KJ6ltfl5yyL-5445h3u93Ej4hWtrk",
@@ -379,7 +380,7 @@ function renderOverview(ledger, completed, stats) {
     <div class="dashboard-grid">
       <article class="panel"><div class="panel-heading"><div><p class="section-kicker">PERFORMANCE</p><h2>累積実現損益</h2></div><span class="period-badge">${filterLabel}</span></div><div class="chart-wrap">${chartSvg(completed)}</div></article>
       <article class="panel"><div class="panel-heading"><div><p class="section-kicker">OPEN POSITIONS</p><h2>保有中の銘柄</h2></div><span class="period-badge">全保有 ${ledger.positions.length}件</span></div><div class="position-list">${ledger.positions.map((position) => `
-        <div class="position-row"><div><strong>${esc(position.code)} ${esc(position.name)}</strong><small>${esc(position.market)} ・ ${esc(position.style)} ・ ${esc(position.accountType === "信用" ? `信用・${position.creditTypes?.length ? position.creditTypes.join("・") : "信用種別未設定"}` : "現物")} ・ 平均取得 ${yen(position.averagePrice, false)}</small></div><div class="position-actions"><strong>${position.quantity.toLocaleString()}株</strong><button class="sale-register-button" data-action="sell" data-code="${esc(position.code)}" data-style="${esc(position.style)}" data-account-type="${esc(position.accountType)}" type="button">売却記録を登録</button></div></div>`).join("") || '<div class="empty-state">現在の保有銘柄はありません</div>'}</div></article>
+        <div class="position-row"><button class="position-row-main" data-action="open-position-buys" data-code="${esc(position.code)}" data-account-type="${esc(position.accountType)}" type="button" aria-label="${esc(position.code)} ${esc(position.name)}の買付記録を確認・編集"><span><strong>${esc(position.code)} ${esc(position.name)}</strong><small>${esc(position.market)} ・ ${esc(position.style)} ・ ${esc(position.accountType === "信用" ? `信用・${position.creditTypes?.length ? position.creditTypes.join("・") : "信用種別未設定"}` : "現物")} ・ 平均取得 ${yen(position.averagePrice, false)}</small></span><span class="position-row-chevron" aria-hidden="true">›</span></button><div class="position-actions"><strong>${position.quantity.toLocaleString()}株</strong><button class="sale-register-button" data-action="sell" data-code="${esc(position.code)}" data-style="${esc(position.style)}" data-account-type="${esc(position.accountType)}" type="button">売却記録を登録</button></div></div>`).join("") || '<div class="empty-state">現在の保有銘柄はありません</div>'}</div></article>
     </div>
     <article class="panel recent-panel"><div class="panel-heading"><div><p class="section-kicker">RECENT ACTIVITY</p><h2>条件内の直近売買</h2></div><button class="text-button" data-action="view-records" type="button">すべて見る ›</button></div><div class="trade-list compact">${recent.map((trade) => tradeCard(trade, positions)).join("") || '<div class="empty-state">選択した条件に該当する売買はありません</div>'}</div></article>`;
 }
@@ -518,6 +519,8 @@ function renderSettings(ledger) {
 }
 
 function switchView(view) {
+  if (!headings[view]) return;
+  const changed = state.activeView !== view;
   state.activeView = view;
   $$(".nav-item").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
   $$(".app-view").forEach((section) => section.classList.add("hidden"));
@@ -526,6 +529,25 @@ function switchView(view) {
   $("#page-subtitle").textContent = headings[view][1];
 
   $("#open-buy").classList.toggle("hidden", view === "settings");
+  if (changed) requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: "auto" }));
+}
+
+function closePositionLotModal() {
+  $("#position-lot-backdrop").classList.add("hidden");
+  $("#position-lot-list").innerHTML = "";
+}
+
+function openPositionBuyEditor(code, accountType) {
+  const lots = openingLotsForPosition(state.trades, code, accountType);
+  if (!lots.length) { showToast("編集できる買付記録が見つかりませんでした"); return; }
+  if (lots.length === 1) { openBuy(lots[0].trade); return; }
+  const first = lots[0].trade;
+  $("#position-lot-title").textContent = `${first.code} ${first.name}`;
+  $("#position-lot-list").innerHTML = lots.map(({ trade, remainingQuantity }) => {
+    const creditDetail = accountTypeOf(trade) === "信用" ? ` ・ ${creditTypeOf(trade) || "信用種別未設定"} ・ ${custodyTypeOf(trade)}` : "";
+    return `<button class="position-lot-choice" data-action="edit-position-lot" data-id="${esc(trade.id)}" type="button"><span><strong>${esc(japaneseDate(trade.date))}</strong><small>${esc(accountTypeOf(trade))}${esc(creditDetail)} ・ 買付 ${yen(trade.price, false)} × ${Number(trade.quantity).toLocaleString()}株</small></span><span><strong>残り ${remainingQuantity.toLocaleString()}株</strong><i aria-hidden="true">›</i></span></button>`;
+  }).join("");
+  $("#position-lot-backdrop").classList.remove("hidden");
 }
 
 function updateBuyCalculationNote() {
@@ -879,6 +901,10 @@ async function saveTrade(event) {
   if (!(price > 0) || !Number.isInteger(quantity) || quantity < 1) { error.textContent = "価格は0より大きい数、株数は1以上の整数で入力してください。"; return; }
   const existing = state.trades.find((trade) => trade.id === state.form.editId);
   const formMode = state.form.mode;
+  if (existing?.action === "買付") {
+    const quantityError = openingQuantityChangeError(state.trades, existing.id, quantity);
+    if (quantityError) { error.textContent = quantityError; return; }
+  }
   const accountType = $("#account-type").value;
   const transactionFee = accountType === "現物" ? Number($("#transaction-fee").value || 0) : 0;
   if (!Number.isInteger(transactionFee) || transactionFee < 0) { error.textContent = "手数料等は0円以上の整数で入力してください。"; return; }
@@ -1080,7 +1106,12 @@ $("#credit-interest-details").addEventListener("change", (event) => {
 $("#trade-quantity").addEventListener("input", updateSalePreview);
 
 $("#modal-backdrop").addEventListener("mousedown", (event) => { if (event.target === $("#modal-backdrop")) closeModal(); });
-document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !$("#modal-backdrop").classList.contains("hidden")) closeModal(); });
+$("#position-lot-backdrop").addEventListener("mousedown", (event) => { if (event.target === $("#position-lot-backdrop")) closePositionLotModal(); });
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  if (!$("#modal-backdrop").classList.contains("hidden")) closeModal();
+  else if (!$("#position-lot-backdrop").classList.contains("hidden")) closePositionLotModal();
+});
 document.addEventListener("click", async (event) => {
   const target = event.target.closest("[data-action], .nav-item, #fill-all");
   if (!target) return;
@@ -1128,6 +1159,9 @@ document.addEventListener("click", async (event) => {
     return;
   }
   if (action === "view-records") switchView("records");
+  if (action === "open-position-buys") { openPositionBuyEditor(target.dataset.code, target.dataset.accountType); return; }
+  if (action === "close-position-lots") { closePositionLotModal(); return; }
+  if (action === "edit-position-lot") { const trade = state.trades.find((item) => item.id === target.dataset.id); if (trade) { closePositionLotModal(); openBuy(trade); } return; }
   if (action === "pnl-period") { state.pnlPeriod = target.dataset.period; renderRecords(calculateLedger(state.trades)); }
   if (action === "sell") openSell(target.dataset.code, target.dataset.style ?? "スイング", target.dataset.accountType ?? "現物", null, target.dataset.date ?? null);
   if (action === "choose-security") { const security = state.securities.find((item) => item.code === target.dataset.code); state.form.selected = security; state.form.manual = false; $("#security-query").value = `${security.code}　${security.name}`; $("#security-options").classList.add("hidden"); $("#manual-fields").classList.add("hidden"); }
