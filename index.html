@@ -84,6 +84,15 @@
             </select>
             <small class="field-help">信用買いの建玉ごとに保存し、返済売り時の金利計算に使用します。</small>
           </label>
+          <label id="custody-type-field" class="full hidden">預り区分
+            <select id="custody-type">
+              <option value="">選択してください</option>
+              <option value="特定">特定</option>
+              <option value="一般">一般</option>
+              <option value="未設定">未設定（既存データのみ）</option>
+            </select>
+            <small class="field-help">SBI証券の一括返済条件に合わせ、信用種別と預り区分が同じ建玉だけをまとめます。</small>
+          </label>
 
           <label id="security-field" class="full">銘柄
             <span class="security-input-wrap">

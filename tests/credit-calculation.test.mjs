@@ -6,19 +6,27 @@ import {
   settlementDate
 } from "../credit-calculation.mjs";
 import {
+  ALLOCATION_METHODS,
+  ALLOCATION_SETTINGS,
   allocationArrayToObject,
   allocationObjectToArray,
   automaticPositionAllocations,
+  creditLotEvaluation,
   sortCreditLots
 } from "../position-allocation.mjs";
 
 const appSource = await readFile(new URL("../app.js", import.meta.url), "utf8");
+const indexSource = await readFile(new URL("../index.html", import.meta.url), "utf8");
 const ledgerSource = appSource.slice(appSource.indexOf("function calculateLedger"), appSource.indexOf("function summaryPeriodStart"));
 const calculationUrl = new URL("../credit-calculation.mjs", import.meta.url).href;
 const ledgerModule = `
   import { CREDIT_TYPES, calculateCreditInterest, rateForCreditType } from ${JSON.stringify(calculationUrl)};
   const accountTypeOf = (trade) => trade.accountType === "信用" ? "信用" : "現物";
   const creditTypeOf = (trade) => CREDIT_TYPES.includes(trade.creditType) ? trade.creditType : "";
+  const CUSTODY_TYPES = ["特定", "一般"];
+  const custodyTypeOf = (trade) => CUSTODY_TYPES.includes(trade.custodyType) ? trade.custodyType : "未設定";
+  const creditGroupKey = (trade) => \`${"${creditTypeOf(trade) || \"信用種別未設定\"}::${custodyTypeOf(trade)}"}\`;
+  const ALLOCATION_SETTINGS = { defaultTradingUnit: 100 };
   const positionKey = (code, accountType) => \`${"${code}:${accountType}"}\`;
   const byTimeAsc = (a, b) => a.date.localeCompare(b.date) || (a.createdAt ?? 0) - (b.createdAt ?? 0) || a.id.localeCompare(b.id);
   ${ledgerSource}
@@ -169,10 +177,13 @@ test("返済建玉の合計不一致と残株超過を登録前に拒否", () =>
   assert.match(excess.invalid, /指定株数合計|残株数/);
 });
 
-test("購入時と異なる運用スタイルの建玉指定を拒否", () => {
+test("運用スタイルが異なる建玉も返済でき、損益を元のスタイルへ配分", () => {
   const buy = trade("b1", "買付", "2026-08-03", 1000, 100, { accountType: "信用", style: "スイング", creditType: "制度信用", annualInterestRate: 0.028 });
   const ledger = calculateLedger([buy, trade("s1", "売却", "2026-08-10", 1100, 100, { accountType: "信用", style: "デイトレ", positionAllocations: [{ openingTradeId: "b1", quantity: 100 }] })]);
-  assert.match(ledger.invalid, /運用スタイルが異なる/);
+  const sale = ledger.calculated.find((item) => item.id === "s1");
+  assert.equal(ledger.invalid, null);
+  assert.equal(sale.styleProfits.スイング, sale.realisedProfit);
+  assert.equal(sale.styleProfits.デイトレ, undefined);
 });
 
 test("自動選択は古い順・新しい順・利益順・損失順を使い分ける", () => {
@@ -192,6 +203,42 @@ test("自動選択は古い順・新しい順・利益順・損失順を使い�
   ];
   assert.equal(automaticPositionAllocations(sameDate, 50, "oldest", 1100)[0].openingTradeId, "higher");
   assert.equal(automaticPositionAllocations(sameDate, 50, "newest", 1100)[0].openingTradeId, "higher");
+});
+
+test("初期返済順はSBI標準の評価益順", () => {
+  assert.equal(ALLOCATION_SETTINGS.defaultMethod, "profit");
+  assert.equal(ALLOCATION_METHODS.profit, "SBI標準：評価益順");
+});
+
+test("SBI建玉別評価損益を1単元換算し、評価益順と同値の古い順を再現", () => {
+  const lots = [
+    { id: "old", date: "2026-08-01", createdAt: 1, price: 1000, remainingQuantity: 200, tradingUnit: 100 },
+    { id: "new", date: "2026-08-02", createdAt: 2, price: 900, remainingQuantity: 100, tradingUnit: 100 },
+    { id: "best", date: "2026-08-03", createdAt: 3, price: 800, remainingQuantity: 100, tradingUnit: 100 }
+  ];
+  const context = { evaluationProfitOverrides: { old: 20000, new: 10000, best: 30000 }, tradingUnit: 100 };
+  assert.equal(creditLotEvaluation(lots[0], context).perTradingUnitProfit, 10000);
+  assert.deepEqual(sortCreditLots(lots, "profit", context).map((lot) => lot.id), ["best", "old", "new"]);
+  assert.deepEqual(sortCreditLots(lots, "loss", context).map((lot) => lot.id), ["old", "new", "best"]);
+});
+
+test("建日順は同日なら1単元評価益が大きい建玉を優先", () => {
+  const lots = [
+    { id: "low", date: "2026-08-05", createdAt: 1, price: 1000, remainingQuantity: 100 },
+    { id: "high", date: "2026-08-05", createdAt: 2, price: 1000, remainingQuantity: 100 }
+  ];
+  const context = { evaluationProfitOverrides: { low: -1000, high: 5000 }, tradingUnit: 100 };
+  assert.equal(sortCreditLots(lots, "oldest", context)[0].id, "high");
+  assert.equal(sortCreditLots(lots, "newest", context)[0].id, "high");
+});
+
+test("信用種別または預り区分が異なる建玉の一括返済を拒否", () => {
+  const buys = [
+    trade("b1", "買付", "2026-08-03", 1000, 100, { accountType: "信用", creditType: "制度信用", custodyType: "特定" }),
+    trade("b2", "買付", "2026-08-03", 1000, 100, { accountType: "信用", creditType: "日計り信用", custodyType: "特定" })
+  ];
+  const sale = trade("s1", "売却", "2026-08-04", 1100, 200, { accountType: "信用", positionAllocations: [{ openingTradeId: "b1", quantity: 100 }, { openingTradeId: "b2", quantity: 100 }] });
+  assert.match(calculateLedger([...buys, sale]).invalid, /信用種別または預り区分/);
 });
 
 test("自動選択後の手動修正を保存用配列へ変換", () => {
@@ -224,9 +271,25 @@ test("既存の信用返済は従来計算を維持し未確認として扱う",
   assert.match(appSource, /返済建玉未確認/);
 });
 
+test("GMO実績値は照合用データとして保持し、返済順ロジックへハードコードしない", async () => {
+  const actual = { code: "9449", date: "2026-08-24", quantity: 2000, price: 4088, fees: 4543, tax: 55670, settlement: 218287 };
+  const reloaded = JSON.parse(JSON.stringify(actual));
+  assert.deepEqual(reloaded, actual);
+  assert.equal(actual.settlement + actual.fees + actual.tax, 278500);
+  assert.doesNotMatch(appSource.slice(appSource.indexOf("function calculateLedger"), appSource.indexOf("function summaryPeriodStart")), /218287|55670|4543/);
+  assert.doesNotMatch(await readFile(new URL("../position-allocation.mjs", import.meta.url), "utf8"), /218287|55670|4543|9449/);
+});
+
 test("建玉指定UI・実績値入力・スマホ向け部品を備える", () => {
   assert.match(appSource, /data-action="allocation-method"/);
   assert.match(appSource, /data-position-lot-id/);
   assert.match(appSource, /brokerActuals/);
   assert.match(appSource, /positionAllocations/);
+  assert.match(appSource, /allocation-evaluation-price/);
+  assert.match(appSource, /data-evaluation-profit-lot-id/);
+  assert.match(appSource, /repaymentGroup/);
+  assert.match(appSource, /custodyType/);
+  assert.match(appSource, /税引後概算/);
+  assert.match(indexSource, /id="custody-type"/);
+  assert.match(indexSource, /特定/);
 });
