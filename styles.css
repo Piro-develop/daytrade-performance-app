@@ -23,3 +23,94 @@
 .position-row-main{min-width:0;min-height:58px;border:0;border-radius:9px;padding:5px 7px;background:transparent;color:var(--ink);display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px;text-align:left}.position-row-main>span:first-child{min-width:0;display:grid;gap:7px}.position-row-main:hover{background:rgba(46,105,76,.2)}.position-row-main:active{background:rgba(46,105,76,.34);transform:translateY(1px)}.position-row-chevron{color:var(--green2);font-size:25px;line-height:1}.position-lot-modal{width:min(620px,100%)}.position-lot-description{margin:-8px 0 18px;color:var(--muted);font-size:11px;line-height:1.7}.position-lot-list{display:grid;gap:10px}.position-lot-choice{width:100%;min-height:76px;border:1px solid #294035;border-radius:10px;padding:14px;background:rgba(7,17,13,.55);color:var(--ink);display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:14px;text-align:left}.position-lot-choice:hover{border-color:#467d5f;background:rgba(31,82,57,.28)}.position-lot-choice:active{transform:translateY(1px)}.position-lot-choice>span{min-width:0;display:grid;gap:7px}.position-lot-choice>span:last-child{grid-template-columns:auto auto;align-items:center;justify-content:end}.position-lot-choice small{color:var(--muted);font-size:10px;line-height:1.6}.position-lot-choice i{color:var(--green2);font-size:22px;font-style:normal}
 
 @media(max-width:720px){.position-row-main{min-height:64px}.position-lot-choice{grid-template-columns:1fr;gap:10px}.position-lot-choice>span:last-child{justify-content:space-between}}
+
+/* Horizontal viewport containment */
+html,
+body {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
+}
+
+.app-shell,
+.main-content,
+.app-view,
+.view-panel,
+.panel,
+.modal-backdrop,
+.trade-modal,
+form,
+.form-grid,
+.form-grid > *,
+.security-input-wrap,
+.credit-interest-details,
+.credit-interest-details > *,
+.credit-lot-card,
+.credit-lot-body,
+.allocation-group-row,
+.allocation-group-row > *,
+.allocation-toolbar,
+.position-lot-list,
+.position-lot-choice {
+  min-width: 0;
+  max-width: 100%;
+}
+
+input,
+select,
+textarea {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.modal-header > div,
+.page-header > div,
+.setting-row > *,
+.allocation-status > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.allocation-group-row select {
+  width: 100%;
+}
+
+.security-option span,
+.fixed-security,
+.credit-interest-heading,
+.credit-lot-meta,
+.position-lot-description,
+.position-lot-choice small,
+.setting-row small,
+.source-note {
+  overflow-wrap: anywhere;
+}
+
+.modal-backdrop,
+.trade-modal {
+  overflow-x: hidden;
+}
+
+@supports (overflow-x: clip) {
+  html,
+  body,
+  .app-shell,
+  .modal-backdrop {
+    overflow-x: clip;
+  }
+}
+
+@media(max-width:720px) {
+  .sidebar nav {
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
+  }
+
+  .settings-nav {
+    flex: 0 0 24%;
+    width: auto;
+    min-width: 0;
+  }
+}
