@@ -179,7 +179,7 @@ test("自動選択は古い順・新しい順・利益順・損失順を使い�
   const lots = [
     { id: "old", date: "2026-08-01", createdAt: 1, price: 1000, remainingQuantity: 100 },
     { id: "loss", date: "2026-08-02", createdAt: 2, price: 1300, remainingQuantity: 100 },
-    { id: "profit", date: "2026-08-03", createdAt: 3, price: 1000, remainingQuantity: 400 }
+    { id: "profit", date: "2026-08-03", createdAt: 3, price: 800, remainingQuantity: 100 }
   ];
   assert.equal(automaticPositionAllocations(lots, 50, "oldest", 1100)[0].openingTradeId, "old");
   assert.equal(automaticPositionAllocations(lots, 50, "newest", 1100)[0].openingTradeId, "profit");
