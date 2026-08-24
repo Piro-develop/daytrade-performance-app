@@ -6,7 +6,7 @@ import { ALLOCATION_METHODS, ALLOCATION_SETTINGS, allocationArrayToObject, alloc
 import { calculateSpotLedger, transactionFeeOf } from "./spot-calculation.mjs";
 import { TAX_SETTINGS, calculateAnnualTaxEstimates, estimatedAfterTaxForTrades } from "./tax-calculation.mjs";
 import { openingLotsForPosition, openingQuantityChangeError } from "./trade-editing.mjs";
-import { createChartAxis, formatChartTick } from "./summary-ui.mjs";
+import { createChartAxis, createChartHighlights, formatChartTick } from "./summary-ui.mjs";
 
 const firebaseConfig = {
   apiKey: "AIzaSyBcF8KJ6ltfl5yyL-5445h3u93Ej4hWtrk",
@@ -320,6 +320,7 @@ function chartSvg(completed) {
   let running = 0;
   const values = [...completed].sort(byTimeAsc).map((trade) => ({ date: trade.date, value: running += trade.realisedProfit }));
   const axis = createChartAxis(values.map((item) => item.value));
+  const highlights = createChartHighlights(values.map((item) => item.value));
   const spread = axis.max - axis.min;
   const points = values.map((item, index) => `${values.length === 1 ? 50 : index / (values.length - 1) * 100},${94 - (item.value - axis.min) / spread * 84}`).join(" ");
   const zeroY = 94 - (0 - axis.min) / spread * 84;
@@ -327,7 +328,7 @@ function chartSvg(completed) {
   const dates = [...new Set(values.map((item) => item.date))];
   const labelIndexes = dates.length === 1 ? [0] : dates.length === 2 ? [0, 1] : [0, Math.floor((dates.length - 1) / 2), dates.length - 1];
   const dateLabels = labelIndexes.map((index) => dates[index].replaceAll("-", "/"));
-  return `<div class="chart-figure"><div class="chart-y-axis">${yTicks.map((tick) => `<span style="top:${tick.y}%">${formatChartTick(tick.value)}</span>`).join("")}</div><svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="累積実現損益グラフ"><defs><linearGradient id="chart-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5ba77b" stop-opacity=".4"/><stop offset="1" stop-color="#5ba77b" stop-opacity=".02"/></linearGradient></defs>${yTicks.filter((tick) => tick.value !== 0).map((tick) => `<line class="chart-grid" x1="0" y1="${tick.y}" x2="100" y2="${tick.y}"/>`).join("")}<line class="chart-zero" x1="0" y1="${zeroY}" x2="100" y2="${zeroY}"/><polygon class="chart-area" points="${points} 100,100 0,100"/><polyline class="chart-line" points="${points}"/></svg><div class="chart-dates ${dateLabels.length === 1 ? "single" : ""}">${dateLabels.map((date) => `<span>${date}</span>`).join("")}</div></div>`;
+  return `<div class="chart-content"><div class="chart-highlights" aria-label="\u7d2f\u7a4d\u5b9f\u73fe\u640d\u76ca\u306e\u6700\u9ad8\u5024\u3068\u73fe\u5728\u5024"><span><i class="maximum" aria-hidden="true"></i>\u6700\u9ad8\u5024 <strong>${yen(highlights.maximum)}</strong></span><span><i class="current" aria-hidden="true"></i>\u73fe\u5728\u5024 <strong>${yen(highlights.current)}</strong></span></div><div class="chart-figure"><div class="chart-y-axis">${yTicks.map((tick) => `<span style="top:${tick.y}%">${formatChartTick(tick.value)}</span>`).join("")}</div><svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="累積実現損益グラフ"><defs><linearGradient id="chart-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5ba77b" stop-opacity=".4"/><stop offset="1" stop-color="#5ba77b" stop-opacity=".02"/></linearGradient></defs>${yTicks.filter((tick) => tick.value !== 0).map((tick) => `<line class="chart-grid" x1="0" y1="${tick.y}" x2="100" y2="${tick.y}"/>`).join("")}<line class="chart-zero" x1="0" y1="${zeroY}" x2="100" y2="${zeroY}"/><polygon class="chart-area" points="${points} 100,100 0,100"/><polyline class="chart-line" points="${points}"/></svg><div class="chart-dates ${dateLabels.length === 1 ? "single" : ""}">${dateLabels.map((date) => `<span>${date}</span>`).join("")}</div></div></div>`;
 }
 
 function render() {

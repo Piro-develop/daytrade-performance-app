@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { createChartAxis, formatChartTick } from "../summary-ui.mjs";
+import { createChartAxis, createChartHighlights, formatChartTick } from "../summary-ui.mjs";
 
 const appSource = await readFile(new URL("../app.js", import.meta.url), "utf8");
 const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
@@ -50,4 +50,26 @@ test("カード編集と売却登録の既存アクションを分離して維�
   assert.match(styles, /\.position-row-meta\s*\{[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/s);
   assert.match(styles, /\.position-row-footer \.sale-register-button\s*\{[^}]*white-space:\s*nowrap;/s);
   assert.match(styles, /\.position-row-footer \.sale-register-button\s*\{[^}]*flex:\s*0 0 auto;/s);
+});
+
+
+test("chart highlights use the maximum and final cumulative values", () => {
+  assert.deepEqual(createChartHighlights([100000, 300000, 250000]), {
+    maximum: 300000,
+    current: 250000
+  });
+  assert.deepEqual(createChartHighlights([-100000, -300000, -250000]), {
+    maximum: -100000,
+    current: -250000
+  });
+  assert.equal(createChartHighlights([]), null);
+});
+
+test("chart shows the maximum and current values without changing its data", () => {
+  assert.match(appSource, /class="chart-highlights"/);
+  assert.match(appSource, /yen\(highlights\.maximum\)/);
+  assert.match(appSource, /yen\(highlights\.current\)/);
+  assert.match(styles, /\.chart-highlights\s*\{[^}]*display:\s*flex;/s);
+  assert.match(styles, /\.chart-highlights span\s*\{[^}]*white-space:\s*nowrap;/s);
+  assert.match(styles, /@media\(max-width:430px\)[\s\S]*\.chart-highlights\s*\{[^}]*justify-content:\s*space-between;/);
 });

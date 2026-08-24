@@ -65,3 +65,12 @@ export function formatChartTick(value) {
   }
   return `${sign}${absolute.toLocaleString("ja-JP")}円`;
 }
+
+export function createChartHighlights(inputValues) {
+  const values = inputValues.map(Number).filter(Number.isFinite);
+  if (!values.length) return null;
+  return {
+    maximum: Math.max(...values),
+    current: values[values.length - 1]
+  };
+}

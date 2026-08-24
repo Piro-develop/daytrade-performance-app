@@ -209,3 +209,64 @@ textarea {
     padding-inline: 9px;
   }
 }
+
+.chart-content {
+  height: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0,1fr);
+  gap: 10px;
+}
+
+.chart-content .chart-figure {
+  min-height: 0;
+}
+
+.chart-highlights {
+  min-width: 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 14px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.chart-highlights span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.chart-highlights strong {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.chart-highlights i {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+}
+
+.chart-highlights i.maximum {
+  background: var(--amber);
+}
+
+.chart-highlights i.current {
+  background: var(--green2);
+}
+
+@media(max-width:430px) {
+  .chart-highlights {
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .chart-highlights strong {
+    font-size: 11px;
+  }
+}
