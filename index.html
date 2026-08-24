@@ -102,6 +102,16 @@
 
           <div id="calculation-note" class="calculation-note full"></div>
           <div id="credit-interest-details" class="credit-interest-details full hidden"></div>
+          <details id="broker-actuals" class="broker-actuals full hidden">
+            <summary>SBI証券の実績値を入力（任意）</summary>
+            <div class="broker-actual-grid">
+              <label>手数料・諸経費<input id="broker-fees" inputmode="numeric" type="number" min="0" step="1" placeholder="例：4543"></label>
+              <label>課税額<input id="broker-tax" inputmode="numeric" type="number" min="0" step="1" placeholder="例：55670"></label>
+              <label>実際の受渡金額・決済損益<input id="broker-settlement" inputmode="numeric" type="number" step="1" placeholder="例：218287"></label>
+            </div>
+            <div id="broker-actual-difference" class="broker-actual-difference"></div>
+            <small>証券会社の表示値との照合用です。自動計算の金利・損益には加算、控除しません。</small>
+          </details>
           <p id="form-error" class="error-message full" role="alert"></p>
           <label class="full">振り返りメモ<textarea id="trade-note" placeholder="売買の根拠・良かった点・改善点など"></textarea></label>
         </div>

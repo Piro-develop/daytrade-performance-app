@@ -1,6 +1,6 @@
 export const CREDIT_SETTINGS = Object.freeze({
   settlementBusinessDays: 2,
-  calculationMethod: "FIFO・受渡日T+2・両端入れ・365日割",
+  calculationMethod: "返済建玉指定・受渡日T+2・両端入れ・365日割",
   rates: Object.freeze({
     "制度信用": 0.028,
     "一般信用（無期限）": 0.028,

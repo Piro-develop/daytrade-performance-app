@@ -5,6 +5,12 @@ import {
   calculateCreditInterest,
   settlementDate
 } from "../credit-calculation.mjs";
+import {
+  allocationArrayToObject,
+  allocationObjectToArray,
+  automaticPositionAllocations,
+  sortCreditLots
+} from "../position-allocation.mjs";
 
 const appSource = await readFile(new URL("../app.js", import.meta.url), "utf8");
 const ledgerSource = appSource.slice(appSource.indexOf("function calculateLedger"), appSource.indexOf("function summaryPeriodStart"));
@@ -115,4 +121,106 @@ test("売却登録は買付時の運用スタイル・取引区分を引き継�
   assert.match(appSource, /openSell\(target\.dataset\.code, target\.dataset\.style/);
   assert.match(appSource, /setAccountType\(accountType, true\)/);
   assert.match(appSource, /\$\("#trade-style"\)\.disabled = true/);
+});
+
+test("指定した建玉の価格と日付で全株返済を計算", () => {
+  const ledger = calculateLedger([
+    trade("b1", "買付", "2026-08-03", 1000, 100, { accountType: "信用", creditType: "制度信用", annualInterestRate: 0.028 }),
+    trade("b2", "買付", "2026-08-05", 900, 100, { accountType: "信用", creditType: "一般信用（無期限）", annualInterestRate: 0.028 }),
+    trade("s1", "売却", "2026-08-10", 1200, 100, { accountType: "信用", positionAllocations: [{ openingTradeId: "b2", quantity: 100 }], allocationMethod: "manual" })
+  ]);
+  const sale = ledger.calculated.find((item) => item.id === "s1");
+  assert.equal(ledger.invalid, null);
+  assert.equal(sale.allocationConfirmed, true);
+  assert.deepEqual(sale.creditAllocations.map((item) => [item.openingTradeId, item.quantity]), [["b2", 100]]);
+  assert.equal(sale.averageCostAtSale, 900);
+  assert.equal(sale.grossProfitBeforeInterest, 30000);
+});
+
+test("1建玉の一部返済は指定株数だけ減らす", () => {
+  const ledger = calculateLedger([
+    trade("b1", "買付", "2026-08-03", 1000, 2000, { accountType: "信用", creditType: "制度信用", annualInterestRate: 0.028 }),
+    trade("s1", "売却", "2026-08-10", 1100, 500, { accountType: "信用", positionAllocations: [{ openingTradeId: "b1", quantity: 500 }], allocationMethod: "manual" })
+  ]);
+  const sale = ledger.calculated.find((item) => item.id === "s1");
+  assert.equal(sale.creditAllocations[0].quantity, 500);
+  assert.equal(sale.grossProfitBeforeInterest, 50000);
+  assert.equal(ledger.openCreditLots[0].remainingQuantity, 1500);
+});
+
+test("複数建玉を指定株数だけ一部返済し残株を維持", () => {
+  const ledger = calculateLedger([
+    trade("b1", "買付", "2026-08-03", 1000, 100, { accountType: "信用", creditType: "制度信用", annualInterestRate: 0.028 }),
+    trade("b2", "買付", "2026-08-05", 1100, 100, { accountType: "信用", creditType: "制度信用", annualInterestRate: 0.028 }),
+    trade("s1", "売却", "2026-08-10", 1200, 75, { accountType: "信用", positionAllocations: [{ openingTradeId: "b2", quantity: 50 }, { openingTradeId: "b1", quantity: 25 }], allocationMethod: "manual" })
+  ]);
+  const sale = ledger.calculated.find((item) => item.id === "s1");
+  assert.deepEqual(sale.creditAllocations.map((item) => [item.openingTradeId, item.quantity]), [["b2", 50], ["b1", 25]]);
+  assert.equal(sale.grossProfitBeforeInterest, 10000);
+  assert.equal(ledger.openCreditLots.find((lot) => lot.id === "b1").remainingQuantity, 75);
+  assert.equal(ledger.openCreditLots.find((lot) => lot.id === "b2").remainingQuantity, 50);
+});
+
+test("返済建玉の合計不一致と残株超過を登録前に拒否", () => {
+  const buy = trade("b1", "買付", "2026-08-03", 1000, 100, { accountType: "信用", creditType: "制度信用", annualInterestRate: 0.028 });
+  const mismatch = calculateLedger([buy, trade("s1", "売却", "2026-08-10", 1100, 50, { accountType: "信用", positionAllocations: [{ openingTradeId: "b1", quantity: 40 }] })]);
+  const excess = calculateLedger([buy, trade("s2", "売却", "2026-08-10", 1100, 100, { accountType: "信用", positionAllocations: [{ openingTradeId: "b1", quantity: 101 }] })]);
+  assert.match(mismatch.invalid, /指定株数合計/);
+  assert.match(excess.invalid, /指定株数合計|残株数/);
+});
+
+test("購入時と異なる運用スタイルの建玉指定を拒否", () => {
+  const buy = trade("b1", "買付", "2026-08-03", 1000, 100, { accountType: "信用", style: "スイング", creditType: "制度信用", annualInterestRate: 0.028 });
+  const ledger = calculateLedger([buy, trade("s1", "売却", "2026-08-10", 1100, 100, { accountType: "信用", style: "デイトレ", positionAllocations: [{ openingTradeId: "b1", quantity: 100 }] })]);
+  assert.match(ledger.invalid, /運用スタイルが異なる/);
+});
+
+test("自動選択は古い順・新しい順・利益順・損失順を使い分ける", () => {
+  const lots = [
+    { id: "old", date: "2026-08-01", createdAt: 1, price: 1000, remainingQuantity: 100 },
+    { id: "loss", date: "2026-08-02", createdAt: 2, price: 1300, remainingQuantity: 100 },
+    { id: "profit", date: "2026-08-03", createdAt: 3, price: 1000, remainingQuantity: 400 }
+  ];
+  assert.equal(automaticPositionAllocations(lots, 50, "oldest", 1100)[0].openingTradeId, "old");
+  assert.equal(automaticPositionAllocations(lots, 50, "newest", 1100)[0].openingTradeId, "profit");
+  assert.equal(automaticPositionAllocations(lots, 50, "profit", 1100)[0].openingTradeId, "profit");
+  assert.equal(automaticPositionAllocations(lots, 50, "loss", 1100)[0].openingTradeId, "loss");
+  assert.deepEqual(sortCreditLots(lots, "oldest", 1100).map((lot) => lot.id), ["old", "loss", "profit"]);
+});
+
+test("自動選択後の手動修正を保存用配列へ変換", () => {
+  const object = allocationArrayToObject([{ openingTradeId: "b1", quantity: 80 }, { openingTradeId: "b2", quantity: 20 }]);
+  object.b1 = 30;
+  object.b2 = 70;
+  assert.deepEqual(allocationObjectToArray(object), [{ openingTradeId: "b1", quantity: 30 }, { openingTradeId: "b2", quantity: 70 }]);
+});
+
+test("保存後の再読込でも建玉指定と証券会社実績値を維持", () => {
+  const trades = JSON.parse(JSON.stringify([
+    trade("b1", "買付", "2026-08-03", 1000, 100, { accountType: "信用", creditType: "制度信用", annualInterestRate: 0.028 }),
+    trade("s1", "売却", "2026-08-10", 1200, 100, { accountType: "信用", positionAllocations: [{ openingTradeId: "b1", quantity: 100 }], allocationMethod: "profit", allocationConfirmed: true, brokerActuals: { fees: 100, tax: 2000, settlement: 17000 } })
+  ]));
+  const sale = calculateLedger(trades).calculated.find((item) => item.id === "s1");
+  assert.equal(sale.allocationMethod, "profit");
+  assert.equal(sale.brokerActuals.settlement, 17000);
+  assert.equal(sale.creditAllocations[0].openingTradeId, "b1");
+});
+
+test("既存の信用返済は従来計算を維持し未確認として扱う", () => {
+  const ledger = calculateLedger([
+    trade("b1", "買付", "2026-08-03", 1000, 100, { accountType: "信用" }),
+    trade("s1", "売却", "2026-08-10", 1100, 100, { accountType: "信用" })
+  ]);
+  const sale = ledger.calculated.find((item) => item.id === "s1");
+  assert.equal(sale.realisedProfit, 10000);
+  assert.equal(sale.allocationConfirmed, false);
+  assert.equal(sale.allocationMethod, "legacy-fifo");
+  assert.match(appSource, /返済建玉未確認/);
+});
+
+test("建玉指定UI・実績値入力・スマホ向け部品を備える", () => {
+  assert.match(appSource, /data-action="allocation-method"/);
+  assert.match(appSource, /data-position-lot-id/);
+  assert.match(appSource, /brokerActuals/);
+  assert.match(appSource, /positionAllocations/);
 });
