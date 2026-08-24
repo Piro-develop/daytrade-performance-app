@@ -6,6 +6,7 @@ import { ALLOCATION_METHODS, ALLOCATION_SETTINGS, allocationArrayToObject, alloc
 import { calculateSpotLedger, transactionFeeOf } from "./spot-calculation.mjs";
 import { TAX_SETTINGS, calculateAnnualTaxEstimates, estimatedAfterTaxForTrades } from "./tax-calculation.mjs";
 import { openingLotsForPosition, openingQuantityChangeError } from "./trade-editing.mjs";
+import { createChartAxis, formatChartTick } from "./summary-ui.mjs";
 
 const firebaseConfig = {
   apiKey: "AIzaSyBcF8KJ6ltfl5yyL-5445h3u93Ej4hWtrk",
@@ -318,16 +319,15 @@ function chartSvg(completed) {
   if (!completed.length) return '<div class="chart-empty">売却記録を登録するとグラフを表示します</div>';
   let running = 0;
   const values = [...completed].sort(byTimeAsc).map((trade) => ({ date: trade.date, value: running += trade.realisedProfit }));
-  const min = Math.min(0, ...values.map((item) => item.value));
-  const max = Math.max(0, ...values.map((item) => item.value));
-  const spread = max - min || 1;
-  const points = values.map((item, index) => `${values.length === 1 ? 50 : index / (values.length - 1) * 100},${94 - (item.value - min) / spread * 84}`).join(" ");
-  const zeroY = 94 - (0 - min) / spread * 84;
-  const yTicks = [...new Set([max, 0, min])].map((value) => ({ value, y: 94 - (value - min) / spread * 84 }));
+  const axis = createChartAxis(values.map((item) => item.value));
+  const spread = axis.max - axis.min;
+  const points = values.map((item, index) => `${values.length === 1 ? 50 : index / (values.length - 1) * 100},${94 - (item.value - axis.min) / spread * 84}`).join(" ");
+  const zeroY = 94 - (0 - axis.min) / spread * 84;
+  const yTicks = axis.ticks.map((value) => ({ value, y: 94 - (value - axis.min) / spread * 84 }));
   const dates = [...new Set(values.map((item) => item.date))];
   const labelIndexes = dates.length === 1 ? [0] : dates.length === 2 ? [0, 1] : [0, Math.floor((dates.length - 1) / 2), dates.length - 1];
   const dateLabels = labelIndexes.map((index) => dates[index].replaceAll("-", "/"));
-  return `<div class="chart-figure"><div class="chart-y-axis">${yTicks.map((tick) => `<span style="top:${tick.y}%">${yen(tick.value, tick.value < 0)}</span>`).join("")}</div><svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="累積実現損益グラフ"><defs><linearGradient id="chart-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5ba77b" stop-opacity=".4"/><stop offset="1" stop-color="#5ba77b" stop-opacity=".02"/></linearGradient></defs>${yTicks.filter((tick) => tick.value !== 0).map((tick) => `<line class="chart-grid" x1="0" y1="${tick.y}" x2="100" y2="${tick.y}"/>`).join("")}<line class="chart-zero" x1="0" y1="${zeroY}" x2="100" y2="${zeroY}"/><polygon class="chart-area" points="${points} 100,100 0,100"/><polyline class="chart-line" points="${points}"/></svg><div class="chart-dates ${dateLabels.length === 1 ? "single" : ""}">${dateLabels.map((date) => `<span>${date}</span>`).join("")}</div></div>`;
+  return `<div class="chart-figure"><div class="chart-y-axis">${yTicks.map((tick) => `<span style="top:${tick.y}%">${formatChartTick(tick.value)}</span>`).join("")}</div><svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="累積実現損益グラフ"><defs><linearGradient id="chart-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5ba77b" stop-opacity=".4"/><stop offset="1" stop-color="#5ba77b" stop-opacity=".02"/></linearGradient></defs>${yTicks.filter((tick) => tick.value !== 0).map((tick) => `<line class="chart-grid" x1="0" y1="${tick.y}" x2="100" y2="${tick.y}"/>`).join("")}<line class="chart-zero" x1="0" y1="${zeroY}" x2="100" y2="${zeroY}"/><polygon class="chart-area" points="${points} 100,100 0,100"/><polyline class="chart-line" points="${points}"/></svg><div class="chart-dates ${dateLabels.length === 1 ? "single" : ""}">${dateLabels.map((date) => `<span>${date}</span>`).join("")}</div></div>`;
 }
 
 function render() {
@@ -368,19 +368,17 @@ function renderOverview(ledger, completed, stats) {
       ${summaryFilterGroup("accountType", "取引区分", [["all","全て"],["現物","現物"],["信用","信用"]])}
     </section>
     <div class="stats-grid summary-stats-grid">
-      <article class="stat-card breakdown-card"><div class="stat-top"><span>実現損益</span><i>円</i></div><div class="summary-breakdown">${profitSummary}</div><small>（ ）内は選択条件の年間損益通算を反映した税引後損益（概算）</small></article>
+      <article class="stat-card breakdown-card"><div class="stat-top"><span>実現損益</span><i>円</i></div><div class="summary-breakdown">${profitSummary}</div><small class="profit-tax-note">（）内は税引後損益</small></article>
       <article class="stat-card breakdown-card"><div class="stat-top"><span>勝率</span><i>◎</i></div><div class="summary-breakdown">${winSummary}</div></article>
-      ${metricCard("PF", "⚖", Number.isFinite(stats.pf) ? stats.pf.toFixed(2) : "∞", "総利益 ÷ 総損失", stats.pf ? "positive" : "muted")}
       ${metricCard("平均利益", "＋", metricYen(stats.averageProfit), "利益になった取引の平均", metricClass(stats.averageProfit))}
       ${metricCard("平均損失", "−", metricYen(stats.averageLoss), "損失になった取引の平均", metricClass(stats.averageLoss))}
       ${metricCard("最大利益", "↑", metricYen(stats.maxProfit), "1取引あたりの最大利益", metricClass(stats.maxProfit))}
       ${metricCard("最大損失", "↓", metricYen(stats.maxLoss), "1取引あたりの最大損失", metricClass(stats.maxLoss))}
-      ${metricCard("最大DD", "↘", metricYen(stats.maxDrawdown), "累積損益の最大下落額", metricClass(stats.maxDrawdown))}
     </div>
     <div class="dashboard-grid">
       <article class="panel"><div class="panel-heading"><div><p class="section-kicker">PERFORMANCE</p><h2>累積実現損益</h2></div><span class="period-badge">${filterLabel}</span></div><div class="chart-wrap">${chartSvg(completed)}</div></article>
       <article class="panel"><div class="panel-heading"><div><p class="section-kicker">OPEN POSITIONS</p><h2>保有中の銘柄</h2></div><span class="period-badge">全保有 ${ledger.positions.length}件</span></div><div class="position-list">${ledger.positions.map((position) => `
-        <div class="position-row"><button class="position-row-main" data-action="open-position-buys" data-code="${esc(position.code)}" data-account-type="${esc(position.accountType)}" type="button" aria-label="${esc(position.code)} ${esc(position.name)}の買付記録を確認・編集"><span><strong>${esc(position.code)} ${esc(position.name)}</strong><small>${esc(position.market)} ・ ${esc(position.style)} ・ ${esc(position.accountType === "信用" ? `信用・${position.creditTypes?.length ? position.creditTypes.join("・") : "信用種別未設定"}` : "現物")} ・ 平均取得 ${yen(position.averagePrice, false)}</small></span><span class="position-row-chevron" aria-hidden="true">›</span></button><div class="position-actions"><strong>${position.quantity.toLocaleString()}株</strong><button class="sale-register-button" data-action="sell" data-code="${esc(position.code)}" data-style="${esc(position.style)}" data-account-type="${esc(position.accountType)}" type="button">売却記録を登録</button></div></div>`).join("") || '<div class="empty-state">現在の保有銘柄はありません</div>'}</div></article>
+        <div class="position-row"><button class="position-row-main" data-action="open-position-buys" data-code="${esc(position.code)}" data-account-type="${esc(position.accountType)}" type="button" aria-label="${esc(position.code)} ${esc(position.name)}の買付記録を確認・編集"><span><strong>${esc(position.code)} ${esc(position.name)}</strong><small class="position-row-meta">${esc(position.market)} ・ ${esc(position.style)} ・ ${esc(position.accountType)}</small></span><span class="position-row-chevron" aria-hidden="true">›</span></button><div class="position-row-footer"><button class="position-values" data-action="open-position-buys" data-code="${esc(position.code)}" data-account-type="${esc(position.accountType)}" type="button" aria-label="${esc(position.code)} ${esc(position.name)}の買付記録を確認・編集"><strong>${position.quantity.toLocaleString()}株</strong><strong>${yen(position.averagePrice, false)}</strong></button><button class="sale-register-button" data-action="sell" data-code="${esc(position.code)}" data-style="${esc(position.style)}" data-account-type="${esc(position.accountType)}" type="button">売買記録を登録</button></div></div>`).join("") || '<div class="empty-state">現在の保有銘柄はありません</div>'}</div></article>
     </div>
     <article class="panel recent-panel"><div class="panel-heading"><div><p class="section-kicker">RECENT ACTIVITY</p><h2>条件内の直近売買</h2></div><button class="text-button" data-action="view-records" type="button">すべて見る ›</button></div><div class="trade-list compact">${recent.map((trade) => tradeCard(trade, positions)).join("") || '<div class="empty-state">選択した条件に該当する売買はありません</div>'}</div></article>`;
 }
