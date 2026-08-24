@@ -38,7 +38,8 @@ test("保有銘柄カードを3段構成にし数値と登録ボタンを同じ�
   assert.match(overviewSource, /position-values[^>]*data-action="open-position-buys"/);
   assert.match(overviewSource, /\$\{position\.quantity\.toLocaleString\(\)\}株<\/strong><strong>\$\{yen\(position\.averagePrice, false\)\}/);
   assert.match(overviewSource, />売買記録を登録<\/button>/);
-  assert.match(styles, /\.position-row-footer\s*\{[^}]*display:\s*flex;[^}]*justify-content:\s*space-between;/s);
+  assert.match(styles, /\.position-row-footer\s*\{[^}]*display:\s*flex;[^}]*justify-content:\s*flex-start;/s);
+  assert.match(styles, /\.position-values\s*\{[^}]*flex:\s*0 1 auto;/s);
   assert.match(styles, /\.position-values strong\s*\{[^}]*font-size:\s*13px;[^}]*font-weight:\s*500;/s);
 });
 
