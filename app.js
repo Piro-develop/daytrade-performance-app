@@ -269,10 +269,11 @@ function calculateLedger(trades) {
 }
 
 function summaryPeriodStart(period) {
-  if (period === "all") return "0000-00-00";
-  if (period === "day") return localDate();
-  if (period === "week") return currentWeekStart();
-  return `${localDate().slice(0, 7)}-01`;
+  return period === "all" ? "0000-00-00" : pnlRange(period).start;
+}
+
+function summaryPeriodEnd(period) {
+  return period === "all" ? "9999-12-31" : pnlRange(period).end;
 }
 
 function styleProfitOf(trade, style) {
@@ -282,7 +283,7 @@ function styleProfitOf(trade, style) {
 
 function matchesSummaryFilters(trade, includePeriod = true, style = state.summaryFilters.style) {
   const { period, accountType } = state.summaryFilters;
-  return (!includePeriod || trade.date >= summaryPeriodStart(period))
+  return (!includePeriod || (trade.date >= summaryPeriodStart(period) && trade.date <= summaryPeriodEnd(period)))
     && (style === "all" || (trade.action === "売却" && trade.styleProfits ? hasOwn(trade.styleProfits, style) : trade.style === style))
     && (accountType === "all" || accountTypeOf(trade) === accountType);
 }
@@ -356,24 +357,26 @@ function renderOverview(ledger, completed, stats) {
   const styleSummary = state.summaryFilters.style === "all"
     ? [["全体", stats], ...["デイトレ", "スイング"].map((style) => [style, statsFor(completedForSummary(ledger.calculated, style))])]
     : [[state.summaryFilters.style, stats]];
-  const profitSummary = styleSummary.map(([label, item]) => { const taxValue = Math.trunc(item.taxReference); return `<div class="summary-breakdown-row"><span>${label}：</span><span class="summary-breakdown-values"><strong class="${item.profit > 0 ? "positive" : item.profit < 0 ? "negative" : "muted"}">${item.profit === 0 ? "± 0円" : yen(item.profit)}</strong><small>(${taxValue === 0 ? "0円" : yen(taxValue)})</small></span></div>`; }).join("");
+  const profitSummary = styleSummary.map(([label, item]) => { const receivedValue = Math.trunc(item.taxReference); return `<div class="summary-breakdown-row"><span>${label}：</span><span class="summary-breakdown-values"><strong class="${receivedValue > 0 ? "positive" : receivedValue < 0 ? "negative" : "muted"}">${receivedValue === 0 ? "± 0円" : yen(receivedValue)}</strong><small>(${item.profit === 0 ? "0円" : yen(item.profit)})</small></span></div>`; }).join("");
   const winSummary = styleSummary.map(([label, item]) => `<div class="summary-breakdown-row"><span>${label}：</span><span class="summary-breakdown-values"><strong class="${item.saleCount ? "positive" : "muted"}">${item.winRate.toFixed(1)}%</strong><small>(${item.winCount}/${item.saleCount})</small></span></div>`).join("");
   const metricYen = (value) => value === 0 ? "± 0円" : yen(value);
   const metricClass = (value) => value > 0 ? "positive" : value < 0 ? "negative" : "muted";
   const metricCard = (label, icon, value, note, className = "") => `<article class="stat-card compact-stat"><div class="stat-top"><span>${label}</span><i>${icon}</i></div><strong class="${className}">${value}</strong><small>${note}</small></article>`;
-  const periodLabels = { day: "今日", week: "今週", month: "今月", all: "全期間" };
+  const periodLabels = { day: "一日", week: "週間", month: "月間", all: "全期間" };
   const styleLabels = { all: "全て", デイトレ: "デイトレ", スイング: "スイング" };
   const accountLabels = { all: "全て", 現物: "現物", 信用: "信用" };
-  const filterLabel = `${periodLabels[state.summaryFilters.period]} × ${styleLabels[state.summaryFilters.style]} × ${accountLabels[state.summaryFilters.accountType]}`;
+  const selectedPeriodLabel = state.summaryFilters.period === "all" ? periodLabels.all : pnlRange(state.summaryFilters.period).label;
+  const filterLabel = `${selectedPeriodLabel} × ${styleLabels[state.summaryFilters.style]} × ${accountLabels[state.summaryFilters.accountType]}`;
   $("#overview-view").innerHTML = `
     <section class="summary-filters" aria-label="サマリの集計条件">
       <div class="summary-filter-heading"><div><p class="section-kicker">SUMMARY FILTERS</p><h2>集計条件</h2></div><small>${filterLabel}</small></div>
-      ${summaryFilterGroup("period", "期間", [["all","全期間"],["day","今日"],["week","週"],["month","月"]])}
+      ${summaryFilterGroup("period", "期間", [["all","全期間"],["day","一日"],["week","週間"],["month","月間"]])}
+      ${state.summaryFilters.period === "all" ? "" : `<div class="pnl-period-selector summary-period-selector">${pnlPeriodSelector(state.summaryFilters.period, "summary-period-picker")}</div>`}
       ${summaryFilterGroup("style", "取引スタイル", [["all","全て"],["デイトレ","デイトレ"],["スイング","スイング"]])}
       ${summaryFilterGroup("accountType", "取引区分", [["all","全て"],["現物","現物"],["信用","信用"]])}
     </section>
     <div class="stats-grid summary-stats-grid">
-      <article class="stat-card breakdown-card"><div class="stat-top"><span>実現損益</span><i>円</i></div><div class="summary-breakdown">${profitSummary}</div><small class="profit-tax-note">（）内は税引後損益</small></article>
+      <article class="stat-card breakdown-card"><div class="stat-top"><span>実現損益</span><i>円</i></div><div class="summary-breakdown">${profitSummary}</div><small class="profit-tax-note">（）内は税引前損益</small></article>
       <article class="stat-card breakdown-card"><div class="stat-top"><span>勝率</span><i>◎</i></div><div class="summary-breakdown">${winSummary}</div></article>
       ${metricCard("平均利益", "＋", metricYen(stats.averageProfit), "利益になった取引の平均", metricClass(stats.averageProfit))}
       ${metricCard("平均損失", "−", metricYen(stats.averageLoss), "損失になった取引の平均", metricClass(stats.averageLoss))}
@@ -383,9 +386,13 @@ function renderOverview(ledger, completed, stats) {
     <div class="dashboard-grid">
       <article class="panel"><div class="panel-heading"><div><p class="section-kicker">PERFORMANCE</p><h2>累積実現損益</h2></div><span class="period-badge">${filterLabel}</span></div><div class="chart-wrap">${chartSvg(completed)}</div></article>
       <article class="panel"><div class="panel-heading"><div><p class="section-kicker">OPEN POSITIONS</p><h2>保有中の銘柄</h2></div><span class="period-badge">全保有 ${ledger.positions.length}件</span></div><div class="position-list">${ledger.positions.map((position) => `
-        <div class="position-row"><button class="position-row-main" data-action="open-position-buys" data-code="${esc(position.code)}" data-account-type="${esc(position.accountType)}" type="button" aria-label="${esc(position.code)} ${esc(position.name)}の買付記録を確認・編集"><span><strong>${esc(position.code)} ${esc(position.name)}</strong><small class="position-row-meta">${esc(position.market)} ・ ${esc(position.style)} ・ ${esc(position.accountType)}</small></span><span class="position-row-chevron" aria-hidden="true">›</span></button><div class="position-row-footer"><button class="position-values" data-action="open-position-buys" data-code="${esc(position.code)}" data-account-type="${esc(position.accountType)}" type="button" aria-label="${esc(position.code)} ${esc(position.name)}の買付記録を確認・編集"><strong>${position.quantity.toLocaleString()}株</strong><strong>${yen(position.averagePrice, false)}</strong></button><button class="sale-register-button" data-action="sell" data-code="${esc(position.code)}" data-style="${esc(position.style)}" data-account-type="${esc(position.accountType)}" type="button">売買記録を登録</button></div></div>`).join("") || '<div class="empty-state">現在の保有銘柄はありません</div>'}</div></article>
+        <div class="position-row"><button class="position-row-main" data-action="open-position-buys" data-code="${esc(position.code)}" data-account-type="${esc(position.accountType)}" type="button" aria-label="${esc(position.code)} ${esc(position.name)}の買付記録を確認・編集"><span><strong>${esc(position.code)} ${esc(position.name)}</strong><small class="position-row-meta">${esc(position.market)} ・ ${esc(position.style)} ・ ${esc(position.accountType)}</small></span><span class="position-row-chevron" aria-hidden="true">›</span></button><div class="position-row-footer"><button class="position-values" data-action="open-position-buys" data-code="${esc(position.code)}" data-account-type="${esc(position.accountType)}" type="button" aria-label="${esc(position.code)} ${esc(position.name)}の買付記録を確認・編集"><strong>${position.quantity.toLocaleString()}株</strong><strong>${yen(position.averagePrice, false)}</strong></button><button class="sale-register-button" data-action="sell" data-code="${esc(position.code)}" data-style="${esc(position.style)}" data-account-type="${esc(position.accountType)}" type="button">売却記録を登録</button></div></div>`).join("") || '<div class="empty-state">現在の保有銘柄はありません</div>'}</div></article>
     </div>
     <article class="panel recent-panel"><div class="panel-heading"><div><p class="section-kicker">RECENT ACTIVITY</p><h2>条件内の直近売買</h2></div><button class="text-button" data-action="view-records" type="button">すべて見る ›</button></div><div class="trade-list compact">${recent.map((trade) => tradeCard(trade, positions)).join("") || '<div class="empty-state">選択した条件に該当する売買はありません</div>'}</div></article>`;
+  $("#summary-period-picker")?.addEventListener("change", (event) => {
+    state.pnlSelections[state.summaryFilters.period] = event.target.value;
+    render();
+  });
 }
 function tradeCard(trade, positions) {
   const accountType = accountTypeOf(trade);
@@ -453,13 +460,13 @@ function pnlRange(period) {
   return { start: localDate(start), end: localDate(end), label: `${start.getFullYear()}年${start.getMonth() + 1}月1日〜${end.getDate()}日` };
 }
 
-function pnlPeriodSelector(period) {
+function pnlPeriodSelector(period, pickerId = "pnl-period-picker") {
   if (period === "day") {
-    return `<label><span>対象日</span><input id="pnl-period-picker" type="date" min="${PNL_HISTORY_START}" max="${localDate()}" value="${state.pnlSelections.day}"></label>`;
+    return `<label><span>対象日</span><input id="${pickerId}" type="date" min="${PNL_HISTORY_START}" max="${localDate()}" value="${state.pnlSelections.day}"></label>`;
   }
   const options = period === "week" ? weekOptions() : monthOptions();
   const label = period === "week" ? "対象週" : "対象月";
-  return `<label><span>${label}</span><select id="pnl-period-picker">${options.map((option) => `<option value="${option.value}" ${state.pnlSelections[period] === option.value ? "selected" : ""}>${option.label}</option>`).join("")}</select></label>`;
+  return `<label><span>${label}</span><select id="${pickerId}">${options.map((option) => `<option value="${option.value}" ${state.pnlSelections[period] === option.value ? "selected" : ""}>${option.label}</option>`).join("")}</select></label>`;
 }
 
 function renderRecords(ledger) {
@@ -585,10 +592,10 @@ function updateCreditTypeVisibility() {
 }
 
 function updateTransactionFeeVisibility() {
-  const isSpot = $("#account-type").value === "現物";
-  $("#transaction-fee-field").classList.toggle("hidden", !isSpot);
-  $("#transaction-fee-label").textContent = state.form.action === "買付" ? "買付手数料等" : "売却手数料等";
-  $("#transaction-fee").disabled = !isSpot;
+  const showTransactionFee = state.form.action === "売却" && $("#account-type").value === "現物";
+  $("#transaction-fee-field").classList.toggle("hidden", !showTransactionFee);
+  $("#transaction-fee-label").textContent = "売却手数料等";
+  $("#transaction-fee").disabled = !showTransactionFee;
 }
 
 function setAccountType(value = "現物", locked = false) {

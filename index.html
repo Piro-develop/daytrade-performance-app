@@ -108,7 +108,7 @@
 
           <label><span id="price-label">取得価格</span><input id="trade-price" inputmode="decimal" type="number" min="0.01" step="any" placeholder="0" required></label>
           <label>株数<input id="trade-quantity" inputmode="numeric" type="number" min="1" step="1" placeholder="100" required><span id="quantity-helper" class="quantity-helper"></span></label>
-          <label id="transaction-fee-field"><span id="transaction-fee-label">買付手数料等</span><input id="transaction-fee" inputmode="numeric" type="number" min="0" step="1" value="0"><small class="field-help">SBI証券の取引明細にある手数料等を入力。無料の場合は0円。</small></label>
+          <label id="transaction-fee-field" class="hidden"><span id="transaction-fee-label">売却手数料等</span><input id="transaction-fee" inputmode="numeric" type="number" min="0" step="1" value="0"><small class="field-help">SBI証券の取引明細にある手数料等を入力。無料の場合は0円。</small></label>
 
           <div id="calculation-note" class="calculation-note full"></div>
           <div id="credit-interest-details" class="credit-interest-details full hidden"></div>

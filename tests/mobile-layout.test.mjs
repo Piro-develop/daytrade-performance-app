@@ -18,6 +18,11 @@ test("モーダル・フォーム・gridとflexの子要素をviewport内で縮�
   assert.match(styles, /\.allocation-group-row select\s*\{[^}]*width:\s*100%;/s);
 });
 
+test("取引日の入力欄をフォーム列の幅へ収める", () => {
+  assert.match(styles, /#trade-date\s*\{[^}]*width:\s*100%;[^}]*min-inline-size:\s*0;[^}]*max-inline-size:\s*100%;/s);
+  assert.match(styles, /#trade-date::\-webkit-date-and-time-value\s*\{[^}]*min-width:\s*0;[^}]*text-align:\s*left;/s);
+});
+
 test("長い銘柄名や設定文は親要素を押し広げず折り返す", () => {
   assert.match(styles, /\.security-option span,[\s\S]*?\.source-note\s*\{[^}]*overflow-wrap:\s*anywhere;/);
 });
