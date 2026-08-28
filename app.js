@@ -6,6 +6,7 @@ import { ALLOCATION_METHODS, ALLOCATION_SETTINGS, allocationArrayToObject, alloc
 import { calculateSpotLedger, transactionFeeOf } from "./spot-calculation.mjs";
 import { TAX_SETTINGS, calculateAnnualTaxEstimates, estimatedAfterTaxForTrades } from "./tax-calculation.mjs";
 import { openingLotsForPosition, openingQuantityChangeError } from "./trade-editing.mjs";
+import { deleteTradeOnce, validateTradeDeletion } from "./trade-deletion.mjs";
 import { createChartAxis, createChartHighlights, formatChartTick } from "./summary-ui.mjs";
 
 const firebaseConfig = {
@@ -62,6 +63,9 @@ const state = {
   unsubscribe: null,
   form: { mode: "new", action: "買付", editId: null, selected: null, manual: false, sellContext: null, interestDayOverrides: {}, positionAllocations: {}, allocationMethod: ALLOCATION_SETTINGS.defaultMethod, allocationGroup: "", allocationTouched: false, availableCreditLots: [], availableCreditGroups: [], evaluationPrice: "", tradingUnit: ALLOCATION_SETTINGS.defaultTradingUnit, evaluationProfitOverrides: {}, evaluationExpenseOverrides: {} }
 };
+
+const pendingDeletionIds = new Set();
+let deletionTradeId = null;
 
 const headings = {
   overview: ["投資運用記録", "デイトレ・スイングの振り返りと成績"],
@@ -487,7 +491,7 @@ function renderRecords(ledger) {
       const result = trade.action === "買付" ? "買付" : trade.realisedProfit === null ? "確認要" : yen(trade.realisedProfit);
       const resultClass = trade.action === "買付" ? "buy-text" : trade.realisedProfit === null ? "muted" : trade.realisedProfit >= 0 ? "positive" : "negative";
       const allocationStatus = trade.action === "売却" && accountTypeOf(trade) === "信用" && !trade.allocationConfirmed ? " ・ 返済建玉未確認" : "";
-      return `<div class="record-entry"><button class="record-entry-main" data-action="edit" data-id="${esc(trade.id)}" type="button"><span class="style-badge">${esc(trade.style)}</span><span class="record-security"><strong>${esc(trade.code)}</strong><span>${esc(trade.name)} ・ ${esc(accountDetailLabel(trade))}${allocationStatus}</span></span><strong class="record-entry-result ${resultClass}">${result}</strong><span class="record-chevron">›</span></button><button class="record-delete" data-action="delete" data-id="${esc(trade.id)}" title="削除" type="button">削</button></div>`;
+      return `<div class="record-entry"><button class="record-entry-main" data-action="edit" data-id="${esc(trade.id)}" type="button"><span class="style-badge">${esc(trade.style)}</span><span class="record-security"><strong>${esc(trade.code)}</strong><span>${esc(trade.name)} ・ ${esc(accountDetailLabel(trade))}${allocationStatus}</span></span><strong class="record-entry-result ${resultClass}">${result}</strong><span class="record-chevron">›</span></button></div>`;
     }).join("")}</div></section>`).join("") || `<div class="empty-state">該当する売買はありません</div>`}</div></div>`;
   const search = $("#record-search");
   search?.addEventListener("input", (event) => { state.recordQuery = event.target.value; renderRecords(calculateLedger(state.trades)); requestAnimationFrame(() => { const next = $("#record-search"); next?.focus(); next?.setSelectionRange(state.recordQuery.length, state.recordQuery.length); }); });
@@ -634,6 +638,7 @@ function resetForm() {
   setAccountType("現物");
   $("#custody-type").value = "特定";
   $("#sell-from-edit").classList.add("hidden");
+  $("#delete-trade").classList.add("hidden");
   $("#credit-interest-details").classList.add("hidden");
   $("#credit-interest-details").innerHTML = "";
   $("#broker-actuals").classList.add("hidden");
@@ -649,6 +654,7 @@ function openBuy(editTrade = null) {
   $("#modal-title").textContent = editTrade ? "買付記録を修正" : "買付記録を登録";
   $("#price-label").textContent = "取得価格";
   $("#save-trade").textContent = editTrade ? "修正を保存" : "買付を記録";
+  $("#delete-trade").classList.toggle("hidden", !editTrade);
   $("#calculation-note").className = "calculation-note full";
   $("#quantity-helper").innerHTML = "";
   if (editTrade) {
@@ -749,6 +755,7 @@ function openSell(code, style = "スイング", accountType = "現物", editTrad
   $("#modal-title").textContent = editTrade ? "売却記録を修正" : "売却記録を登録";
   $("#price-label").textContent = "売却価格";
   $("#save-trade").textContent = editTrade ? "修正を保存" : "売却を記録";
+  $("#delete-trade").classList.toggle("hidden", !editTrade);
   $("#security-field").classList.add("hidden");
   $("#fixed-security").classList.remove("hidden");
   $("#fixed-security").innerHTML = `<small>売却対象銘柄</small><strong>${esc(code)}　${esc(state.form.selected.name)}</strong><span>銘柄・運用スタイル・取引区分は、買付時の内容から変更できません</span>`;
@@ -979,14 +986,70 @@ async function saveTrade(event) {
   } finally { button.disabled = false; }
 }
 
-async function removeTrade(id) {
-  const trade = state.trades.find((item) => item.id === id);
-  if (!trade || !confirm(`${trade.date} ${trade.name}の${trade.action}記録を削除しますか？`)) return;
-  const candidate = state.trades.filter((item) => item.id !== id);
-  const validation = calculateLedger(candidate);
-  if (validation.invalid) { alert(`削除できません。\n${validation.invalid}\n先に後続の売却記録を修正または削除してください。`); return; }
-  try { await deleteDoc(doc(db, "users", state.user.uid, "trades", id)); showToast("売買記録を削除しました"); }
-  catch (cause) { console.error(cause); alert("削除できませんでした。通信状態をご確認ください。"); }
+function closeDeleteConfirmation(force = false) {
+  if (!force && deletionTradeId && pendingDeletionIds.has(deletionTradeId)) return;
+  $("#delete-confirm-backdrop").classList.add("hidden");
+  $("#delete-confirm-details").innerHTML = "";
+  $("#delete-confirm-error").textContent = "";
+  deletionTradeId = null;
+  $("#confirm-delete").disabled = false;
+  $("#cancel-delete").disabled = false;
+  $("#delete-confirm-close").disabled = false;
+}
+
+function openDeleteConfirmation() {
+  if (state.form.mode !== "edit" || !state.form.editId) return;
+  const trade = state.trades.find((item) => item.id === state.form.editId);
+  if (!trade) { showToast("削除対象の約定記録が見つかりません"); return; }
+  deletionTradeId = trade.id;
+  const details = [
+    ["銘柄コード", trade.code],
+    ["銘柄名", trade.name],
+    ["約定日", japaneseDate(trade.date)],
+    ["売買", trade.action],
+    ["取引区分", accountTypeOf(trade)],
+    ["約定価格", yen(trade.price, false)],
+    ["株数", `${Number(trade.quantity).toLocaleString()}株`]
+  ];
+  $("#delete-confirm-details").innerHTML = details.map(([label, value]) => `<div><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join("");
+  $("#delete-confirm-error").textContent = "";
+  $("#delete-confirm-backdrop").classList.remove("hidden");
+  requestAnimationFrame(() => $("#cancel-delete").focus());
+}
+
+async function confirmTradeDeletion() {
+  const id = deletionTradeId;
+  if (!id) return;
+  const error = $("#delete-confirm-error");
+  error.textContent = "";
+  const validation = validateTradeDeletion(state.trades, id, calculateLedger);
+  if (!validation.ok) { error.textContent = validation.error; return; }
+
+  const confirmButton = $("#confirm-delete");
+  const cancelButton = $("#cancel-delete");
+  const closeButton = $("#delete-confirm-close");
+  confirmButton.disabled = true;
+  cancelButton.disabled = true;
+  closeButton.disabled = true;
+  const result = await deleteTradeOnce({
+    id,
+    pendingIds: pendingDeletionIds,
+    deleteDocument: (documentId) => deleteDoc(doc(db, "users", state.user.uid, "trades", documentId))
+  });
+
+  if (result.status === "failed") {
+    console.error(result.error);
+    error.textContent = "削除できませんでした。通信状態を確認して、もう一度お試しください。";
+    confirmButton.disabled = false;
+    cancelButton.disabled = false;
+    closeButton.disabled = false;
+    return;
+  }
+  if (result.status === "pending") return;
+
+  closeDeleteConfirmation(true);
+  closeModal();
+  showToast("売買記録を削除しました");
 }
 
 function exportCsv() {
@@ -1044,6 +1107,10 @@ $("#close-modal").addEventListener("click", closeModal);
 $("#cancel-modal").addEventListener("click", closeModal);
 $("#sell-from-edit").addEventListener("click", () => { const trade = state.trades.find((item) => item.id === state.form.editId); if (!trade) return; closeModal(); openSell(trade.code, trade.style, accountTypeOf(trade), null, trade.date); });
 $("#trade-form").addEventListener("submit", saveTrade);
+$("#delete-trade").addEventListener("click", openDeleteConfirmation);
+$("#cancel-delete").addEventListener("click", () => closeDeleteConfirmation());
+$("#delete-confirm-close").addEventListener("click", () => closeDeleteConfirmation());
+$("#confirm-delete").addEventListener("click", confirmTradeDeletion);
 $("#security-query").addEventListener("focus", showSecurityOptions);
 $("#security-query").addEventListener("input", () => { state.form.selected = null; state.form.manual = false; $("#manual-fields").classList.add("hidden"); showSecurityOptions(); });
 $("#trade-price").addEventListener("input", updateSalePreview);
@@ -1112,9 +1179,11 @@ $("#trade-quantity").addEventListener("input", updateSalePreview);
 
 $("#modal-backdrop").addEventListener("mousedown", (event) => { if (event.target === $("#modal-backdrop")) closeModal(); });
 $("#position-lot-backdrop").addEventListener("mousedown", (event) => { if (event.target === $("#position-lot-backdrop")) closePositionLotModal(); });
+$("#delete-confirm-backdrop").addEventListener("mousedown", (event) => { if (event.target === $("#delete-confirm-backdrop")) closeDeleteConfirmation(); });
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
-  if (!$("#modal-backdrop").classList.contains("hidden")) closeModal();
+  if (!$("#delete-confirm-backdrop").classList.contains("hidden")) closeDeleteConfirmation();
+  else if (!$("#modal-backdrop").classList.contains("hidden")) closeModal();
   else if (!$("#position-lot-backdrop").classList.contains("hidden")) closePositionLotModal();
 });
 document.addEventListener("click", async (event) => {
@@ -1172,7 +1241,6 @@ document.addEventListener("click", async (event) => {
   if (action === "choose-security") { const security = state.securities.find((item) => item.code === target.dataset.code); state.form.selected = security; state.form.manual = false; $("#security-query").value = `${security.code}　${security.name}`; $("#security-options").classList.add("hidden"); $("#manual-fields").classList.add("hidden"); }
   if (action === "manual-security") { state.form.manual = true; state.form.selected = null; $("#security-options").classList.add("hidden"); $("#manual-fields").classList.remove("hidden"); $("#manual-code").focus(); }
   if (action === "edit") { const trade = state.trades.find((item) => item.id === target.dataset.id); if (trade) trade.action === "買付" ? openBuy(trade) : openSell(trade.code, trade.style, accountTypeOf(trade), trade); }
-  if (action === "delete") await removeTrade(target.dataset.id);
   if (action === "csv") exportCsv();
   if (action === "logout") await signOut(auth);
 });
