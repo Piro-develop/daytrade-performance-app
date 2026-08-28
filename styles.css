@@ -169,12 +169,15 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: nowrap;
   gap: 10px;
 }
 
 .position-values {
   min-width: 0;
-  flex: 1 1 auto;
+  max-width: 100%;
+  overflow: hidden;
+  flex: 1 1 0;
   display: flex;
   align-items: center;
   gap: clamp(8px,3vw,16px);
@@ -201,7 +204,33 @@ textarea {
 
 .position-row-footer .sale-register-button {
   min-height: 38px;
+  max-width: 100%;
   flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.tax-before-secondary,
+.trade-result small,
+.record-entry-result small,
+.record-summary-values small {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 400;
+}
+
+.record-summary-values,
+.record-entry-result {
+  min-width: 0;
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  text-align: right;
+}
+
+.record-entry-result strong,
+.record-entry-result small,
+.record-summary-values strong,
+.record-summary-values small {
   white-space: nowrap;
 }
 

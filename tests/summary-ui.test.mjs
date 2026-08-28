@@ -29,7 +29,7 @@ test("マイナスとプラスの累積損益を両方含む目盛りを作る",
 test("実現損益は税引後を主表示、税引前を括弧内へ表示する", () => {
   assert.match(overviewSource, /const receivedValue = Math\.trunc\(item\.taxReference\)/);
   assert.match(overviewSource, /<strong class="\$\{receivedValue[^}]+\}">\$\{receivedValue[^}]+\}<\/strong><small>\(\$\{item\.profit/);
-  assert.match(overviewSource, /class="profit-tax-note">（）内は税引前損益<\/small>/);
+  assert.match(overviewSource, /class="profit-tax-note">SBI実績を優先・未入力分は概算／（）内は税引前損益<\/small>/);
   assert.doesNotMatch(overviewSource, /metricCard\("PF"|metricCard\("最大DD"/);
   assert.match(styles, /\.profit-tax-note\s*\{[^}]*white-space:\s*nowrap;/s);
   assert.match(styles, /\.summary-stats-grid\s*\{[^}]*grid-template-columns:\s*repeat\(3,minmax\(0,1fr\)\)/s);
@@ -61,8 +61,8 @@ test("保有銘柄カードを3段構成にし数値と登録ボタンを同じ�
   assert.match(overviewSource, /\$\{position\.quantity\.toLocaleString\(\)\}株<\/strong><strong>\$\{yen\(position\.averagePrice, false\)\}/);
   assert.match(overviewSource, />売却記録を登録<\/button>/);
   assert.match(overviewSource, /position-row-footer[^>]*>[\s\S]*position-values[\s\S]*sale-register-button/);
-  assert.match(styles, /\.position-row-footer\s*\{[^}]*width:\s*100%;[^}]*max-width:\s*100%;[^}]*display:\s*flex;[^}]*justify-content:\s*space-between;/s);
-  assert.match(styles, /\.position-values\s*\{[^}]*min-width:\s*0;[^}]*flex:\s*1 1 auto;/s);
+  assert.match(styles, /\.position-row-footer\s*\{[^}]*width:\s*100%;[^}]*max-width:\s*100%;[^}]*display:\s*flex;[^}]*justify-content:\s*space-between;[^}]*flex-wrap:\s*nowrap;/s);
+  assert.match(styles, /\.position-values\s*\{[^}]*min-width:\s*0;[^}]*max-width:\s*100%;[^}]*overflow:\s*hidden;[^}]*flex:\s*1 1 0;/s);
   assert.match(styles, /\.position-values strong\s*\{[^}]*font-size:\s*13px;[^}]*font-weight:\s*500;/s);
 });
 

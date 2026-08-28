@@ -4,10 +4,11 @@ import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, setDoc, s
 import { CREDIT_SETTINGS, CREDIT_TYPES, calculateCreditInterest, rateForCreditType } from "./credit-calculation.mjs";
 import { ALLOCATION_METHODS, ALLOCATION_SETTINGS, allocationArrayToObject, allocationObjectToArray, automaticPositionAllocations, creditLotEvaluation } from "./position-allocation.mjs";
 import { calculateSpotLedger, transactionFeeOf } from "./spot-calculation.mjs";
-import { TAX_SETTINGS, calculateAnnualTaxEstimates, estimatedAfterTaxForTrades } from "./tax-calculation.mjs";
+import { TAX_SETTINGS, calculateAnnualTaxEstimates } from "./tax-calculation.mjs";
 import { openingLotsForPosition, openingQuantityChangeError } from "./trade-editing.mjs";
 import { deleteTradeOnce, validateTradeDeletion } from "./trade-deletion.mjs";
 import { createChartAxis, createChartHighlights, formatChartTick } from "./summary-ui.mjs";
+import { afterTaxProfitOf, afterTaxSourceLabel, afterTaxTotalForTrades } from "./profit-display.mjs";
 
 const firebaseConfig = {
   apiKey: "AIzaSyBcF8KJ6ltfl5yyL-5445h3u93Ej4hWtrk",
@@ -281,6 +282,11 @@ function styleProfitOf(trade, style) {
   return trade.style === style ? Number(trade.realisedProfit) : null;
 }
 
+function styleScopedBrokerActuals(trade) {
+  const nonZeroStyles = Object.values(trade.styleProfits ?? {}).filter((profit) => Number(profit) !== 0);
+  return nonZeroStyles.length > 1 ? null : trade.brokerActuals;
+}
+
 function matchesSummaryFilters(trade, includePeriod = true, style = state.summaryFilters.style) {
   const { period, accountType } = state.summaryFilters;
   return (!includePeriod || (trade.date >= summaryPeriodStart(period) && trade.date <= summaryPeriodEnd(period)))
@@ -289,9 +295,12 @@ function matchesSummaryFilters(trade, includePeriod = true, style = state.summar
 }
 
 function completedForSummary(calculated, style = state.summaryFilters.style) {
-  return calculated
+  const completed = calculated
     .filter((trade) => trade.action === "売却" && trade.realisedProfit !== null && matchesSummaryFilters(trade, true, style))
-    .map((trade) => style === "all" ? trade : { ...trade, style, realisedProfit: styleProfitOf(trade, style) });
+    .map((trade) => style === "all" ? trade : { ...trade, style, realisedProfit: styleProfitOf(trade, style), brokerActuals: styleScopedBrokerActuals(trade), estimatedAfterTaxProfit: undefined });
+  if (style === "all") return completed;
+  const taxEstimates = calculateAnnualTaxEstimates(completed);
+  return completed.map((trade) => ({ ...trade, ...(taxEstimates.taxResults.get(trade.id) ?? {}) }));
 }
 
 function statsFor(completed) {
@@ -299,6 +308,9 @@ function statsFor(completed) {
   const losses = completed.filter((trade) => trade.realisedProfit < 0);
   const grossProfit = wins.reduce((sum, trade) => sum + trade.realisedProfit, 0);
   const grossLoss = Math.abs(losses.reduce((sum, trade) => sum + trade.realisedProfit, 0));
+  const afterTaxValues = completed.map(afterTaxProfitOf);
+  const afterTaxWins = afterTaxValues.filter((profit) => profit > 0);
+  const afterTaxLosses = afterTaxValues.filter((profit) => profit < 0);
   let total = 0, peak = 0, maxDrawdown = 0;
   [...completed].sort(byTimeAsc).forEach((trade) => {
     total += trade.realisedProfit;
@@ -307,7 +319,7 @@ function statsFor(completed) {
   });
   return {
     profit: grossProfit - grossLoss,
-    taxReference: estimatedAfterTaxForTrades(completed),
+    taxReference: afterTaxTotalForTrades(completed),
     winRate: completed.length ? wins.length / completed.length * 100 : 0,
     winCount: wins.length,
     saleCount: completed.length,
@@ -315,6 +327,10 @@ function statsFor(completed) {
     averageLoss: losses.length ? -grossLoss / losses.length : 0,
     maxProfit: wins.length ? Math.max(...wins.map((trade) => trade.realisedProfit)) : 0,
     maxLoss: losses.length ? Math.min(...losses.map((trade) => trade.realisedProfit)) : 0,
+    afterTaxAverageProfit: afterTaxWins.length ? afterTaxWins.reduce((sum, profit) => sum + profit, 0) / afterTaxWins.length : 0,
+    afterTaxAverageLoss: afterTaxLosses.length ? afterTaxLosses.reduce((sum, profit) => sum + profit, 0) / afterTaxLosses.length : 0,
+    afterTaxMaxProfit: afterTaxWins.length ? Math.max(...afterTaxWins) : 0,
+    afterTaxMaxLoss: afterTaxLosses.length ? Math.min(...afterTaxLosses) : 0,
     pf: grossLoss ? grossProfit / grossLoss : grossProfit ? Infinity : 0,
     maxDrawdown
   };
@@ -323,7 +339,7 @@ function statsFor(completed) {
 function chartSvg(completed) {
   if (!completed.length) return '<div class="chart-empty">売却記録を登録するとグラフを表示します</div>';
   let running = 0;
-  const values = [...completed].sort(byTimeAsc).map((trade) => ({ date: trade.date, value: running += trade.realisedProfit }));
+  const values = [...completed].sort(byTimeAsc).map((trade) => ({ date: trade.date, value: running += afterTaxProfitOf(trade) }));
   const axis = createChartAxis(values.map((item) => item.value));
   const highlights = createChartHighlights(values.map((item) => item.value));
   const spread = axis.max - axis.min;
@@ -333,7 +349,7 @@ function chartSvg(completed) {
   const dates = [...new Set(values.map((item) => item.date))];
   const labelIndexes = dates.length === 1 ? [0] : dates.length === 2 ? [0, 1] : [0, Math.floor((dates.length - 1) / 2), dates.length - 1];
   const dateLabels = labelIndexes.map((index) => dates[index].replaceAll("-", "/"));
-  return `<div class="chart-content"><div class="chart-highlights" aria-label="\u7d2f\u7a4d\u5b9f\u73fe\u640d\u76ca\u306e\u6700\u9ad8\u5024\u3068\u73fe\u5728\u5024"><span><i class="maximum" aria-hidden="true"></i>\u6700\u9ad8\u5024 <strong>${yen(highlights.maximum)}</strong></span><span><i class="current" aria-hidden="true"></i>\u73fe\u5728\u5024 <strong>${yen(highlights.current)}</strong></span></div><div class="chart-figure"><div class="chart-y-axis">${yTicks.map((tick) => `<span style="top:${tick.y}%">${formatChartTick(tick.value)}</span>`).join("")}</div><svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="累積実現損益グラフ"><defs><linearGradient id="chart-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5ba77b" stop-opacity=".4"/><stop offset="1" stop-color="#5ba77b" stop-opacity=".02"/></linearGradient></defs>${yTicks.filter((tick) => tick.value !== 0).map((tick) => `<line class="chart-grid" x1="0" y1="${tick.y}" x2="100" y2="${tick.y}"/>`).join("")}<line class="chart-zero" x1="0" y1="${zeroY}" x2="100" y2="${zeroY}"/><polygon class="chart-area" points="${points} 100,100 0,100"/><polyline class="chart-line" points="${points}"/></svg><div class="chart-dates ${dateLabels.length === 1 ? "single" : ""}">${dateLabels.map((date) => `<span>${date}</span>`).join("")}</div></div></div>`;
+  return `<div class="chart-content"><div class="chart-highlights" aria-label="\u7d2f\u7a4d\u7a0e\u5f15\u5f8c\u640d\u76ca\u306e\u6700\u9ad8\u5024\u3068\u73fe\u5728\u5024"><span><i class="maximum" aria-hidden="true"></i>\u6700\u9ad8\u5024 <strong>${yen(highlights.maximum)}</strong></span><span><i class="current" aria-hidden="true"></i>\u73fe\u5728\u5024 <strong>${yen(highlights.current)}</strong></span></div><div class="chart-figure"><div class="chart-y-axis">${yTicks.map((tick) => `<span style="top:${tick.y}%">${formatChartTick(tick.value)}</span>`).join("")}</div><svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="累積税引後損益グラフ"><defs><linearGradient id="chart-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5ba77b" stop-opacity=".4"/><stop offset="1" stop-color="#5ba77b" stop-opacity=".02"/></linearGradient></defs>${yTicks.filter((tick) => tick.value !== 0).map((tick) => `<line class="chart-grid" x1="0" y1="${tick.y}" x2="100" y2="${tick.y}"/>`).join("")}<line class="chart-zero" x1="0" y1="${zeroY}" x2="100" y2="${zeroY}"/><polygon class="chart-area" points="${points} 100,100 0,100"/><polyline class="chart-line" points="${points}"/></svg><div class="chart-dates ${dateLabels.length === 1 ? "single" : ""}">${dateLabels.map((date) => `<span>${date}</span>`).join("")}</div></div></div>`;
 }
 
 function render() {
@@ -361,7 +377,7 @@ function renderOverview(ledger, completed, stats) {
   const winSummary = styleSummary.map(([label, item]) => `<div class="summary-breakdown-row"><span>${label}：</span><span class="summary-breakdown-values"><strong class="${item.saleCount ? "positive" : "muted"}">${item.winRate.toFixed(1)}%</strong><small>(${item.winCount}/${item.saleCount})</small></span></div>`).join("");
   const metricYen = (value) => value === 0 ? "± 0円" : yen(value);
   const metricClass = (value) => value > 0 ? "positive" : value < 0 ? "negative" : "muted";
-  const metricCard = (label, icon, value, note, className = "") => `<article class="stat-card compact-stat"><div class="stat-top"><span>${label}</span><i>${icon}</i></div><strong class="${className}">${value}</strong><small>${note}</small></article>`;
+  const metricCard = (label, icon, value, note, className = "", secondary = "") => `<article class="stat-card compact-stat"><div class="stat-top"><span>${label}</span><i>${icon}</i></div><strong class="${className}">${value}</strong><small>${note}</small>${secondary ? `<small class="tax-before-secondary">${secondary}</small>` : ""}</article>`;
   const periodLabels = { day: "一日", week: "週間", month: "月間", all: "全期間" };
   const styleLabels = { all: "全て", デイトレ: "デイトレ", スイング: "スイング" };
   const accountLabels = { all: "全て", 現物: "現物", 信用: "信用" };
@@ -376,15 +392,15 @@ function renderOverview(ledger, completed, stats) {
       ${summaryFilterGroup("accountType", "取引区分", [["all","全て"],["現物","現物"],["信用","信用"]])}
     </section>
     <div class="stats-grid summary-stats-grid">
-      <article class="stat-card breakdown-card"><div class="stat-top"><span>実現損益</span><i>円</i></div><div class="summary-breakdown">${profitSummary}</div><small class="profit-tax-note">（）内は税引前損益</small></article>
+      <article class="stat-card breakdown-card"><div class="stat-top"><span>税引後損益</span><i>円</i></div><div class="summary-breakdown">${profitSummary}</div><small class="profit-tax-note">SBI実績を優先・未入力分は概算／（）内は税引前損益</small></article>
       <article class="stat-card breakdown-card"><div class="stat-top"><span>勝率</span><i>◎</i></div><div class="summary-breakdown">${winSummary}</div></article>
-      ${metricCard("平均利益", "＋", metricYen(stats.averageProfit), "利益になった取引の平均", metricClass(stats.averageProfit))}
-      ${metricCard("平均損失", "−", metricYen(stats.averageLoss), "損失になった取引の平均", metricClass(stats.averageLoss))}
-      ${metricCard("最大利益", "↑", metricYen(stats.maxProfit), "1取引あたりの最大利益", metricClass(stats.maxProfit))}
-      ${metricCard("最大損失", "↓", metricYen(stats.maxLoss), "1取引あたりの最大損失", metricClass(stats.maxLoss))}
+      ${metricCard("平均利益", "＋", metricYen(stats.afterTaxAverageProfit), "税引後・利益取引の平均", metricClass(stats.afterTaxAverageProfit), `（税引前 ${metricYen(stats.averageProfit)}）`)}
+      ${metricCard("平均損失", "−", metricYen(stats.afterTaxAverageLoss), "税引後・損失取引の平均", metricClass(stats.afterTaxAverageLoss), `（税引前 ${metricYen(stats.averageLoss)}）`)}
+      ${metricCard("最大利益", "↑", metricYen(stats.afterTaxMaxProfit), "税引後・1取引の最大利益", metricClass(stats.afterTaxMaxProfit), `（税引前 ${metricYen(stats.maxProfit)}）`)}
+      ${metricCard("最大損失", "↓", metricYen(stats.afterTaxMaxLoss), "税引後・1取引の最大損失", metricClass(stats.afterTaxMaxLoss), `（税引前 ${metricYen(stats.maxLoss)}）`)}
     </div>
     <div class="dashboard-grid">
-      <article class="panel"><div class="panel-heading"><div><p class="section-kicker">PERFORMANCE</p><h2>累積実現損益</h2></div><span class="period-badge">${filterLabel}</span></div><div class="chart-wrap">${chartSvg(completed)}</div></article>
+      <article class="panel"><div class="panel-heading"><div><p class="section-kicker">PERFORMANCE</p><h2>累積税引後損益</h2></div><span class="period-badge">${filterLabel}</span></div><div class="chart-wrap">${chartSvg(completed)}</div></article>
       <article class="panel"><div class="panel-heading"><div><p class="section-kicker">OPEN POSITIONS</p><h2>保有中の銘柄</h2></div><span class="period-badge">全保有 ${ledger.positions.length}件</span></div><div class="position-list">${ledger.positions.map((position) => `
         <div class="position-row"><button class="position-row-main" data-action="open-position-buys" data-code="${esc(position.code)}" data-account-type="${esc(position.accountType)}" type="button" aria-label="${esc(position.code)} ${esc(position.name)}の買付記録を確認・編集"><span><strong>${esc(position.code)} ${esc(position.name)}</strong><small class="position-row-meta">${esc(position.market)} ・ ${esc(position.style)} ・ ${esc(position.accountType)}</small></span><span class="position-row-chevron" aria-hidden="true">›</span></button><div class="position-row-footer"><button class="position-values" data-action="open-position-buys" data-code="${esc(position.code)}" data-account-type="${esc(position.accountType)}" type="button" aria-label="${esc(position.code)} ${esc(position.name)}の買付記録を確認・編集"><strong>${position.quantity.toLocaleString()}株</strong><strong>${yen(position.averagePrice, false)}</strong></button><button class="sale-register-button" data-action="sell" data-code="${esc(position.code)}" data-style="${esc(position.style)}" data-account-type="${esc(position.accountType)}" type="button">売却記録を登録</button></div></div>`).join("") || '<div class="empty-state">現在の保有銘柄はありません</div>'}</div></article>
     </div>
@@ -397,9 +413,12 @@ function renderOverview(ledger, completed, stats) {
 function tradeCard(trade, positions) {
   const accountType = accountTypeOf(trade);
   const position = positions.get(positionKey(trade.code, accountType));
-  const result = trade.realisedProfit === null ? (position ? "保有中" : "売却済み") : yen(trade.realisedProfit);
-  const resultClass = trade.realisedProfit === null ? "muted" : trade.realisedProfit >= 0 ? "positive" : "negative";
-  return `<div class="trade-row"><span class="side-badge ${trade.action === "買付" ? "buy" : "sell"}">${trade.action === "買付" ? "BUY" : "SELL"}</span><div class="trade-main"><strong>${esc(trade.code)} ${esc(trade.name)}</strong><small>${trade.date.replaceAll("-", "/")} ・ ${esc(trade.style)} ・ ${esc(accountDetailLabel(trade))} ・ ${yen(trade.price, false)} × ${trade.quantity.toLocaleString()}株</small></div><div class="trade-result"><strong class="${resultClass}">${result}</strong>${trade.action === "買付" && position ? `<button class="sale-register-button" data-action="sell" data-code="${esc(trade.code)}" data-style="${esc(trade.style)}" data-account-type="${esc(accountType)}" data-date="${esc(trade.date)}" type="button">売却記録を登録</button>` : ""}</div></div>`;
+  const hasProfit = trade.realisedProfit !== null;
+  const afterTaxProfit = hasProfit ? afterTaxProfitOf(trade) : null;
+  const result = !hasProfit ? (position ? "保有中" : "売却済み") : yen(afterTaxProfit);
+  const resultClass = !hasProfit ? "muted" : afterTaxProfit >= 0 ? "positive" : "negative";
+  const taxBefore = hasProfit ? `<small>（税引前 ${yen(trade.realisedProfit)}）・${afterTaxSourceLabel(trade)}</small>` : "";
+  return `<div class="trade-row"><span class="side-badge ${trade.action === "買付" ? "buy" : "sell"}">${trade.action === "買付" ? "BUY" : "SELL"}</span><div class="trade-main"><strong>${esc(trade.code)} ${esc(trade.name)}</strong><small>${trade.date.replaceAll("-", "/")} ・ ${esc(trade.style)} ・ ${esc(accountDetailLabel(trade))} ・ ${yen(trade.price, false)} × ${trade.quantity.toLocaleString()}株</small></div><div class="trade-result"><strong class="${resultClass}">${result}</strong>${taxBefore}${trade.action === "買付" && position ? `<button class="sale-register-button" data-action="sell" data-code="${esc(trade.code)}" data-style="${esc(trade.style)}" data-account-type="${esc(accountType)}" data-date="${esc(trade.date)}" type="button">売却記録を登録</button>` : ""}</div></div>`;
 }
 
 function parseLocalDate(value) {
@@ -483,22 +502,30 @@ function renderRecords(ledger) {
   });
   const completed = ledger.calculated.filter((trade) => trade.action === "売却" && trade.realisedProfit !== null);
   const period = pnlRange(state.pnlPeriod);
-  const totalPnl = completed.reduce((sum, trade) => sum + trade.realisedProfit, 0);
-  const selectedPnl = completed.filter((trade) => trade.date >= period.start && trade.date <= period.end).reduce((sum, trade) => sum + trade.realisedProfit, 0);
+  const selectedTrades = completed.filter((trade) => trade.date >= period.start && trade.date <= period.end);
+  const recordSales = records.filter((trade) => trade.action === "売却" && trade.realisedProfit !== null);
+  const totalTaxBefore = completed.reduce((sum, trade) => sum + trade.realisedProfit, 0);
+  const selectedTaxBefore = selectedTrades.reduce((sum, trade) => sum + trade.realisedProfit, 0);
+  const recordTaxBefore = recordSales.reduce((sum, trade) => sum + trade.realisedProfit, 0);
+  const totalPnl = afterTaxTotalForTrades(completed);
+  const selectedPnl = afterTaxTotalForTrades(selectedTrades);
+  const recordPnl = afterTaxTotalForTrades(recordSales);
   const positions = new Map(ledger.positions.map((position) => [position.code, position]));
   $("#records-view").innerHTML = `
     <div class="pnl-overview">
-      <article class="pnl-card"><div><p class="section-kicker">TOTAL PROFIT / LOSS</p><h2>全期間の累計損益</h2></div><strong class="${totalPnl >= 0 ? "positive" : "negative"}">${yen(totalPnl)}</strong><small>売却済み取引の利益と損失を全期間で合算</small></article>
-      <article class="pnl-card"><div class="pnl-card-heading"><div><p class="section-kicker">PERIOD PROFIT / LOSS</p><h2>期間別の損益</h2></div><div class="pnl-period-switch">${[["day","一日"],["week","週間"],["month","月間"]].map(([value,label]) => `<button class="${state.pnlPeriod === value ? "active" : ""}" data-action="pnl-period" data-period="${value}" type="button">${label}</button>`).join("")}</div></div>
+      <article class="pnl-card"><div><p class="section-kicker">TOTAL PROFIT / LOSS</p><h2>全期間の累計税引後損益</h2></div><strong class="${totalPnl >= 0 ? "positive" : "negative"}">${yen(totalPnl)}</strong><small class="tax-before-secondary">（税引前 ${yen(totalTaxBefore)}）</small><small>SBI実績を優先・未入力分は年間損益通算による概算</small></article>
+      <article class="pnl-card"><div class="pnl-card-heading"><div><p class="section-kicker">PERIOD PROFIT / LOSS</p><h2>期間別の税引後損益</h2></div><div class="pnl-period-switch">${[["day","一日"],["week","週間"],["month","月間"]].map(([value,label]) => `<button class="${state.pnlPeriod === value ? "active" : ""}" data-action="pnl-period" data-period="${value}" type="button">${label}</button>`).join("")}</div></div>
       <div class="pnl-period-selector">${pnlPeriodSelector(state.pnlPeriod)}</div>
-      <strong class="${selectedPnl >= 0 ? "positive" : "negative"}">${yen(selectedPnl)}</strong><small>${period.label} ・ 表示期間内の売却済み取引について、利益と損失を合算</small></article>
+      <strong class="${selectedPnl >= 0 ? "positive" : "negative"}">${yen(selectedPnl)}</strong><small class="tax-before-secondary">（税引前 ${yen(selectedTaxBefore)}）</small><small>${period.label} ・ SBI実績を優先・未入力分は概算</small></article>
     </div>
-    <div class="view-panel records-list-panel"><div class="records-toolbar"><label class="search-field">⌕<input id="record-search" value="${esc(state.recordQuery)}" placeholder="銘柄コード・銘柄名で検索"></label><div class="record-summary"><span>${records.length}件</span><strong class="${records.reduce((sum,t)=>sum+(t.realisedProfit??0),0)>=0?"positive":"negative"}">${yen(records.reduce((sum,t)=>sum+(t.realisedProfit??0),0))}</strong></div></div>
+    <div class="view-panel records-list-panel"><div class="records-toolbar"><label class="search-field">⌕<input id="record-search" value="${esc(state.recordQuery)}" placeholder="銘柄コード・銘柄名で検索"></label><div class="record-summary"><span>${records.length}件</span><span class="record-summary-values"><strong class="${recordPnl>=0?"positive":"negative"}">${yen(recordPnl)}</strong><small>（税引前 ${yen(recordTaxBefore)}）</small></span></div></div>
     <div class="record-groups">${recordGroups.map((group) => `<section class="record-day"><h3>${japaneseDate(group.date)}</h3><div class="record-day-list">${group.trades.map((trade) => {
-      const result = trade.action === "買付" ? "買付" : trade.realisedProfit === null ? "確認要" : yen(trade.realisedProfit);
-      const resultClass = trade.action === "買付" ? "buy-text" : trade.realisedProfit === null ? "muted" : trade.realisedProfit >= 0 ? "positive" : "negative";
+      const afterTaxProfit = trade.realisedProfit === null ? null : afterTaxProfitOf(trade);
+      const result = trade.action === "買付" ? "買付" : afterTaxProfit === null ? "確認要" : yen(afterTaxProfit);
+      const resultClass = trade.action === "買付" ? "buy-text" : afterTaxProfit === null ? "muted" : afterTaxProfit >= 0 ? "positive" : "negative";
+      const taxBefore = trade.action === "売却" && trade.realisedProfit !== null ? `<small>（税引前 ${yen(trade.realisedProfit)}）・${afterTaxSourceLabel(trade)}</small>` : "";
       const allocationStatus = trade.action === "売却" && accountTypeOf(trade) === "信用" && !trade.allocationConfirmed ? " ・ 返済建玉未確認" : "";
-      return `<div class="record-entry"><button class="record-entry-main" data-action="edit" data-id="${esc(trade.id)}" type="button"><span class="style-badge">${esc(trade.style)}</span><span class="record-security"><strong>${esc(trade.code)}</strong><span>${esc(trade.name)} ・ ${esc(accountDetailLabel(trade))}${allocationStatus}</span></span><strong class="record-entry-result ${resultClass}">${result}</strong><span class="record-chevron">›</span></button></div>`;
+      return `<div class="record-entry"><button class="record-entry-main" data-action="edit" data-id="${esc(trade.id)}" type="button"><span class="style-badge">${esc(trade.style)}</span><span class="record-security"><strong>${esc(trade.code)}</strong><span>${esc(trade.name)} ・ ${esc(accountDetailLabel(trade))}${allocationStatus}</span></span><span class="record-entry-result"><strong class="${resultClass}">${result}</strong>${taxBefore}</span><span class="record-chevron">›</span></button></div>`;
     }).join("")}</div></section>`).join("") || `<div class="empty-state">該当する売買はありません</div>`}</div></div>`;
   const search = $("#record-search");
   search?.addEventListener("input", (event) => { state.recordQuery = event.target.value; renderRecords(calculateLedger(state.trades)); requestAnimationFrame(() => { const next = $("#record-search"); next?.focus(); next?.setSelectionRange(state.recordQuery.length, state.recordQuery.length); }); });
@@ -509,13 +536,15 @@ function renderAnalytics(ledger) {
   const completed = ledger.calculated.filter((trade) => trade.action === "売却" && trade.realisedProfit !== null);
   const stats = statsFor(completed);
   const score = completed.length ? Math.round(Math.max(0, Math.min(100, 45 + stats.winRate * .35 + Math.min(Number.isFinite(stats.pf) ? stats.pf : 4, 4) * 8))) : 0;
-  const completedByStyle = (style) => completed.flatMap((trade) => {
-    const profit = styleProfitOf(trade, style);
-    return profit === null ? [] : [{ ...trade, style, realisedProfit: profit }];
-  });
-  const styleAmount = (style) => completedByStyle(style).reduce((sum, trade) => sum + trade.realisedProfit, 0);
-  const styleAfterTax = (style) => estimatedAfterTaxForTrades(completedByStyle(style));
-  $("#analytics-view").innerHTML = `<div class="analytics-layout"><article class="view-panel score-panel"><p class="section-kicker">TRADING SCORE</p><div class="score-ring"><span>${score}</span><small>/ 100</small></div><h2>${completed.length ? (score >= 70 ? "安定したパフォーマンス" : "改善余地があります") : "売却記録がありません"}</h2><p>売却済み取引だけを分析し、信用取引は金利控除後の実現損益を使用します。</p></article><article class="view-panel"><div class="panel-heading"><div><p class="section-kicker">TRADE STYLE</p><h2>運用スタイル別の実現損益</h2></div></div><div class="style-results">${["デイトレ","スイング"].map((style) => { const amount=styleAmount(style); return `<div><span>${style}</span><strong class="${amount>=0?"positive":"negative"}">${yen(amount)}</strong><small>税引後損益（概算） ${yen(styleAfterTax(style))}</small></div>`; }).join("")}</div></article><article class="view-panel"><div class="panel-heading"><div><p class="section-kicker">INSIGHTS</p><h2>振り返りポイント</h2></div></div><div class="insight-list"><div><span>01</span><p><strong>売買を実際の約定単位で記録</strong><small>買付と売却を分け、売却時に損益を確定します。</small></p></div><div><span>02</span><p><strong>現物と信用を分けて計算</strong><small>現物は税務上の取得単価と取引成績上の平均原価を分け、信用は返済する買付建玉を指定して金利を控除します。</small></p></div><div><span>03</span><p><strong>保有数超過を登録前に防止</strong><small>履歴の修正・削除時にも整合性を確認します。</small></p></div></div></article></div>`;
+  const completedByStyle = (style) => {
+    const allocated = completed.flatMap((trade) => {
+      const profit = styleProfitOf(trade, style);
+      return profit === null ? [] : [{ ...trade, style, realisedProfit: profit, brokerActuals: styleScopedBrokerActuals(trade), estimatedAfterTaxProfit: undefined }];
+    });
+    const taxEstimates = calculateAnnualTaxEstimates(allocated);
+    return allocated.map((trade) => ({ ...trade, ...(taxEstimates.taxResults.get(trade.id) ?? {}) }));
+  };
+  $("#analytics-view").innerHTML = `<div class="analytics-layout"><article class="view-panel score-panel"><p class="section-kicker">TRADING SCORE</p><div class="score-ring"><span>${score}</span><small>/ 100</small></div><h2>${completed.length ? (score >= 70 ? "安定したパフォーマンス" : "改善余地があります") : "売却記録がありません"}</h2><p>売却済み取引だけを分析し、信用取引は金利控除後の実現損益を使用します。</p></article><article class="view-panel"><div class="panel-heading"><div><p class="section-kicker">TRADE STYLE</p><h2>運用スタイル別の税引後損益</h2></div></div><div class="style-results">${["デイトレ","スイング"].map((style) => { const trades=completedByStyle(style); const taxBefore=trades.reduce((sum, trade) => sum + trade.realisedProfit, 0); const amount=afterTaxTotalForTrades(trades); return `<div><span>${style}・税引後損益</span><strong class="${amount>=0?"positive":"negative"}">${yen(amount)}</strong><small>（税引前 ${yen(taxBefore)}）・概算</small></div>`; }).join("")}</div></article><article class="view-panel"><div class="panel-heading"><div><p class="section-kicker">INSIGHTS</p><h2>振り返りポイント</h2></div></div><div class="insight-list"><div><span>01</span><p><strong>売買を実際の約定単位で記録</strong><small>買付と売却を分け、売却時に損益を確定します。</small></p></div><div><span>02</span><p><strong>現物と信用を分けて計算</strong><small>現物は税務上の取得単価と取引成績上の平均原価を分け、信用は返済する買付建玉を指定して金利を控除します。</small></p></div><div><span>03</span><p><strong>保有数超過を登録前に防止</strong><small>履歴の修正・削除時にも整合性を確認します。</small></p></div></div></article></div>`;
 }
 
 function renderSettings(ledger) {
@@ -525,7 +554,7 @@ function renderSettings(ledger) {
   const annualTaxHtml = annualRows || '<div class="empty-state">売却済み取引がありません</div>';
   const spotRuleDifference = ledger.calculated.filter((trade) => trade.action === "売却" && accountTypeOf(trade) === "現物").reduce((sum, trade) => sum + Number(trade.realisedProfitDifference || 0), 0);
   const spotDifferenceText = spotRuleDifference === 0 ? "現在の記録では差額なし" : "現在の記録への影響 " + yen(spotRuleDifference);
-  $("#settings-view").innerHTML = `<div class="settings-layout"><article class="view-panel settings-card"><p class="section-kicker">ACCOUNT</p><h2>ログイン中のアカウント</h2><div class="setting-row"><span class="account-chip">${state.user.photoURL ? `<img src="${esc(state.user.photoURL)}" alt="">` : ""}<span><strong>${esc(state.user.displayName || "Googleユーザー")}</strong><small>${esc(state.user.email || "")}</small></span></span><button class="secondary-button" data-action="logout" type="button">ログアウト</button></div></article><article class="view-panel settings-card"><p class="section-kicker">CALCULATION</p><h2>計算設定</h2><div class="setting-row"><span><strong>実現損益</strong><small>現物はSBI証券の税務上の取得価額に合わせ、同日中の全買付を先に合算し、買付手数料を含む1株単価を1円未満切り上げます。売却手数料は実現損益から控除します。信用は従来どおり返済建玉と金利を反映します。</small></span><span class="fixed-value">税引前を基本表示</span></div><div class="setting-row"><span><strong>信用買い金利</strong><small>制度信用 2.80%／一般信用（無期限）2.80%／日計りは当日0%、持越し1.80%。受渡日T+2の両端入れ、365日割、円未満切捨て。</small></span><span class="fixed-value">買付時の率を保存</span></div><div class="setting-row"><span><strong>税引後損益（概算）</strong><small>受渡日基準の暦年ごとに現物・信用の利益と損失を通算し、所得税等${incomeTaxRateLabel}％と住民税${residentTaxRateLabel}％を別々に円未満切捨て。損失後の利益では徴収、利益後の損失では還付として概算します。</small></span><span class="fixed-value">特定口座（源泉徴収あり）想定</span></div></article><article class="view-panel settings-card"><p class="section-kicker">ANNUAL TAX ESTIMATE</p><h2>年間損益・税額（概算）</h2>${annualTaxHtml}<div class="setting-row"><span><strong>旧計算との差</strong><small>取引成績用の平均原価と、SBI税務ルールの実現損益との差です。</small></span><span class="fixed-value">${spotDifferenceText}</span></div><p class="source-note">全記録を1つの特定口座（源泉徴収あり）として概算しています。NISA／一般口座／複数証券会社・配当・投資信託等は区別していないため、実際の税額はSBI証券の年間取引報告書で確認してください。</p></article><article class="view-panel settings-card"><p class="section-kicker">DATA</p><h2>データ管理</h2><div class="setting-row"><span><strong>Firebase同期</strong><small>Googleログインしたご本人の端末間で自動同期</small></span><span class="fixed-value">接続済み</span></div><div class="setting-row"><span><strong>CSVバックアップ</strong><small>${state.trades.length}件の売買記録を書き出します</small></span><button class="secondary-button" data-action="csv" type="button">書き出す</button></div><p class="source-note">銘柄検索：JPX「東証上場銘柄一覧」${esc(state.stocksAsOf)}時点。信用金利の営業日カレンダーは2026・2027年のJPX休場日を収録し、その他の年は手動日数修正に対応。</p></article></div>`;
+  $("#settings-view").innerHTML = `<div class="settings-layout"><article class="view-panel settings-card"><p class="section-kicker">ACCOUNT</p><h2>ログイン中のアカウント</h2><div class="setting-row"><span class="account-chip">${state.user.photoURL ? `<img src="${esc(state.user.photoURL)}" alt="">` : ""}<span><strong>${esc(state.user.displayName || "Googleユーザー")}</strong><small>${esc(state.user.email || "")}</small></span></span><button class="secondary-button" data-action="logout" type="button">ログアウト</button></div></article><article class="view-panel settings-card"><p class="section-kicker">CALCULATION</p><h2>計算設定</h2><div class="setting-row"><span><strong>実現損益</strong><small>現物はSBI証券の税務上の取得価額に合わせ、同日中の全買付を先に合算し、買付手数料を含む1株単価を1円未満切り上げます。売却手数料は実現損益から控除します。信用は従来どおり返済建玉と金利を反映します。</small></span><span class="fixed-value">税引後を基本表示</span></div><div class="setting-row"><span><strong>信用買い金利</strong><small>制度信用 2.80%／一般信用（無期限）2.80%／日計りは当日0%、持越し1.80%。受渡日T+2の両端入れ、365日割、円未満切捨て。</small></span><span class="fixed-value">買付時の率を保存</span></div><div class="setting-row"><span><strong>税引後損益（概算）</strong><small>受渡日基準の暦年ごとに現物・信用の利益と損失を通算し、所得税等${incomeTaxRateLabel}％と住民税${residentTaxRateLabel}％を別々に円未満切捨て。損失後の利益では徴収、利益後の損失では還付として概算します。</small></span><span class="fixed-value">特定口座（源泉徴収あり）想定</span></div></article><article class="view-panel settings-card"><p class="section-kicker">ANNUAL TAX ESTIMATE</p><h2>年間損益・税額（概算）</h2>${annualTaxHtml}<div class="setting-row"><span><strong>旧計算との差</strong><small>取引成績用の平均原価と、SBI税務ルールの実現損益との差です。</small></span><span class="fixed-value">${spotDifferenceText}</span></div><p class="source-note">全記録を1つの特定口座（源泉徴収あり）として概算しています。NISA／一般口座／複数証券会社・配当・投資信託等は区別していないため、実際の税額はSBI証券の年間取引報告書で確認してください。</p></article><article class="view-panel settings-card"><p class="section-kicker">DATA</p><h2>データ管理</h2><div class="setting-row"><span><strong>Firebase同期</strong><small>Googleログインしたご本人の端末間で自動同期</small></span><span class="fixed-value">接続済み</span></div><div class="setting-row"><span><strong>CSVバックアップ</strong><small>${state.trades.length}件の売買記録を書き出します</small></span><button class="secondary-button" data-action="csv" type="button">書き出す</button></div><p class="source-note">銘柄検索：JPX「東証上場銘柄一覧」${esc(state.stocksAsOf)}時点。信用金利の営業日カレンダーは2026・2027年のJPX休場日を収録し、その他の年は手動日数修正に対応。</p></article></div>`;
 }
 
 function switchView(view) {
@@ -835,11 +864,12 @@ function updateSalePreview() {
   const profit = calculated?.realisedProfit ?? null;
   const gross = calculated?.grossProfitBeforeInterest ?? null;
   const interest = calculated?.creditInterest ?? 0;
-  const afterTaxProfit = calculated?.estimatedAfterTaxProfit ?? null;
+  const afterTaxProfit = calculated ? afterTaxProfitOf(calculated) : null;
+  const afterTaxLabel = calculated ? afterTaxSourceLabel(calculated) : "概算";
   const isSpotSale = $("#account-type").value === "現物";
   const fee = calculated?.transactionFee ?? Number($("#transaction-fee").value || 0);
   const performanceProfit = calculated?.tradePerformanceProfit ?? null;
-  $("#calculation-note").innerHTML = `<span><small>売却可能株数</small><strong>${maxQuantity.toLocaleString()}株</strong></span><span><small>取得価格</small><strong>${yen(averagePrice,false)}</strong>${gross === null ? "" : `<small>${isSpotSale ? "手数料控除前" : "金利控除前"} ${yen(gross)}</small>`}</span><span><small>${isSpotSale ? "売却手数料等" : "信用金利"}</small><strong>${yen(isSpotSale ? fee : interest, false)}</strong></span><span><small>${isSpotSale ? "税務上の実現損益" : "実現損益見込み"}</small><strong class="${profit === null ? "muted" : profit >= 0 ? "positive" : "negative"}">${profit === null ? "価格・株数を入力" : yen(profit)}</strong>${profit === null ? "" : `<small>税引後損益（概算） ${yen(afterTaxProfit)}</small>${isSpotSale && performanceProfit !== null ? `<small>取引成績上 ${yen(performanceProfit)}</small>` : ""}`}</span>`;
+  $("#calculation-note").innerHTML = `<span><small>売却可能株数</small><strong>${maxQuantity.toLocaleString()}株</strong></span><span><small>取得価格</small><strong>${yen(averagePrice,false)}</strong>${gross === null ? "" : `<small>${isSpotSale ? "手数料控除前" : "金利控除前"} ${yen(gross)}</small>`}</span><span><small>${isSpotSale ? "売却手数料等" : "信用金利"}</small><strong>${yen(isSpotSale ? fee : interest, false)}</strong></span><span><small>${`税引後損益（${afterTaxLabel}）`}</small><strong class="${afterTaxProfit === null ? "muted" : afterTaxProfit >= 0 ? "positive" : "negative"}">${afterTaxProfit === null ? "価格・株数を入力" : yen(afterTaxProfit)}</strong>${profit === null ? "" : `<small>（税引前 ${yen(profit)}）</small>${isSpotSale && performanceProfit !== null ? `<small>取引成績上 ${yen(performanceProfit)}</small>` : ""}`}</span>`;
   renderCreditLotSelector(calculated, quantity, price);
   renderBrokerActualDifference(calculated);
 }

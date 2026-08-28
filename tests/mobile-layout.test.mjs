@@ -18,7 +18,10 @@ test("モーダル・フォーム・gridとflexの子要素をviewport内で縮�
   assert.match(styles, /\.allocation-group-row select\s*\{[^}]*width:\s*100%;/s);
 });
 
-test("取引日の入力欄をフォーム列の幅へ収める", () => {
+test("取引日の入力欄を銘柄・取引区分と同じ全幅フォーム列へ揃える", () => {
+  assert.match(indexSource, /<label class="full">取引日<input id="trade-date" type="date" required><\/label>/);
+  assert.match(indexSource, /<div class="form-choice full"><span>取引区分<\/span>/);
+  assert.match(indexSource, /<label id="security-field" class="full">銘柄/);
   assert.match(styles, /#trade-date\s*\{[^}]*width:\s*100%;[^}]*min-inline-size:\s*0;[^}]*max-inline-size:\s*100%;/s);
   assert.match(styles, /#trade-date::\-webkit-date-and-time-value\s*\{[^}]*min-width:\s*0;[^}]*text-align:\s*left;/s);
 });
@@ -27,7 +30,10 @@ test("長い銘柄名や設定文は親要素を押し広げず折り返す", ()
   assert.match(styles, /\.security-option span,[\s\S]*?\.source-note\s*\{[^}]*overflow-wrap:\s*anywhere;/);
 });
 
-test("390px・393px・430pxで下部ナビの合計幅が親幅を超えない規則を使う", () => {
+test("390px・393px・430pxで保有3段目と下部ナビを折り返さず親幅内へ収める", () => {
+  assert.match(styles, /\.position-row-footer\s*\{[^}]*flex-wrap:\s*nowrap;/s);
+  assert.match(styles, /\.position-row-footer \.sale-register-button\s*\{[^}]*white-space:\s*nowrap;/s);
+  assert.match(styles, /@media\(max-width:430px\)[\s\S]*\.position-row-footer\s*\{[^}]*gap:\s*6px;/);
   const breakpoint = Number(styles.match(/@media\s*\(max-width:(\d+)px\)\s*\{\s*\.sidebar nav\s*\{\s*flex:\s*1 1 0;/)?.[1]);
   assert.ok([390, 393, 430].every((width) => width <= breakpoint));
   assert.match(styles, /\.settings-nav\s*\{\s*flex:\s*0 0 24%;\s*width:\s*auto;\s*min-width:\s*0;/);
