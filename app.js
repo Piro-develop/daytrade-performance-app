@@ -35,6 +35,24 @@ const localDate = (date = new Date()) => `${date.getFullYear()}-${String(date.ge
 const currentWeekStart = () => { const date = new Date(); date.setHours(0, 0, 0, 0); const day = date.getDay(); date.setDate(date.getDate() - (day === 0 ? 6 : day - 1)); return localDate(date); };
 const yen = (value, signed = true) => `${signed && value > 0 ? "+ " : signed && value < 0 ? "− " : ""}${Math.abs(value).toLocaleString("ja-JP", { maximumFractionDigits: 0 })}円`;
 const normalize = (value) => String(value ?? "").normalize("NFKC").toLowerCase().replace(/[ァ-ヶ]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0x60)).replace(/[\s・（）()株式会社]/g, "");
+const KEYBOARD_SAFE_INPUT_SELECTOR = ".keyboard-safe-input";
+let focusedInputFrame = 0;
+
+function keepFocusedInputVisible() {
+  const field = document.activeElement;
+  if (!(field instanceof HTMLElement) || !field.matches(KEYBOARD_SAFE_INPUT_SELECTOR)) return;
+  cancelAnimationFrame(focusedInputFrame);
+  focusedInputFrame = requestAnimationFrame(() => {
+    const viewport = window.visualViewport;
+    const visibleTop = viewport?.offsetTop ?? 0;
+    const visibleBottom = visibleTop + (viewport?.height ?? window.innerHeight);
+    const rect = field.getBoundingClientRect();
+    const margin = 16;
+    if (rect.top < visibleTop + margin || rect.bottom > visibleBottom - margin) {
+      field.scrollIntoView({ block: "center", inline: "nearest", behavior: "auto" });
+    }
+  });
+}
 const byTimeAsc = (a, b) => a.date.localeCompare(b.date) || (a.createdAt ?? 0) - (b.createdAt ?? 0) || a.id.localeCompare(b.id);
 const accountTypeOf = (trade) => trade.accountType === "信用" ? "信用" : "現物";
 const creditTypeOf = (trade) => CREDIT_TYPES.includes(trade.creditType) ? trade.creditType : "";
@@ -518,7 +536,7 @@ function renderRecords(ledger) {
       <div class="pnl-period-selector">${pnlPeriodSelector(state.pnlPeriod)}</div>
       <strong class="${selectedPnl >= 0 ? "positive" : "negative"}">${yen(selectedPnl)}</strong><small class="tax-before-secondary">（税引前 ${yen(selectedTaxBefore)}）</small><small>${period.label} ・ SBI実績を優先・未入力分は概算</small></article>
     </div>
-    <div class="view-panel records-list-panel"><div class="records-toolbar"><label class="search-field">⌕<input id="record-search" value="${esc(state.recordQuery)}" placeholder="銘柄コード・銘柄名で検索"></label><div class="record-summary"><span>${records.length}件</span><span class="record-summary-values"><strong class="${recordPnl>=0?"positive":"negative"}">${yen(recordPnl)}</strong><small>（税引前 ${yen(recordTaxBefore)}）</small></span></div></div>
+    <div class="view-panel records-list-panel"><div class="records-toolbar"><label class="search-field">⌕<input id="record-search" class="keyboard-safe-input" value="${esc(state.recordQuery)}" placeholder="銘柄コード・銘柄名で検索"></label><div class="record-summary"><span>${records.length}件</span><span class="record-summary-values"><strong class="${recordPnl>=0?"positive":"negative"}">${yen(recordPnl)}</strong><small>（税引前 ${yen(recordTaxBefore)}）</small></span></div></div>
     <div class="record-groups">${recordGroups.map((group) => `<section class="record-day"><h3>${japaneseDate(group.date)}</h3><div class="record-day-list">${group.trades.map((trade) => {
       const afterTaxProfit = trade.realisedProfit === null ? null : afterTaxProfitOf(trade);
       const result = trade.action === "買付" ? "買付" : afterTaxProfit === null ? "確認要" : yen(afterTaxProfit);
@@ -528,7 +546,7 @@ function renderRecords(ledger) {
       return `<div class="record-entry"><button class="record-entry-main" data-action="edit" data-id="${esc(trade.id)}" type="button"><span class="style-badge">${esc(trade.style)}</span><span class="record-security"><strong>${esc(trade.code)}</strong><span>${esc(trade.name)} ・ ${esc(accountDetailLabel(trade))}${allocationStatus}</span></span><span class="record-entry-result"><strong class="${resultClass}">${result}</strong>${taxBefore}</span><span class="record-chevron">›</span></button></div>`;
     }).join("")}</div></section>`).join("") || `<div class="empty-state">該当する売買はありません</div>`}</div></div>`;
   const search = $("#record-search");
-  search?.addEventListener("input", (event) => { state.recordQuery = event.target.value; renderRecords(calculateLedger(state.trades)); requestAnimationFrame(() => { const next = $("#record-search"); next?.focus(); next?.setSelectionRange(state.recordQuery.length, state.recordQuery.length); }); });
+  search?.addEventListener("input", (event) => { state.recordQuery = event.target.value; renderRecords(calculateLedger(state.trades)); requestAnimationFrame(() => { const next = $("#record-search"); next?.focus({ preventScroll: true }); next?.setSelectionRange(state.recordQuery.length, state.recordQuery.length); keepFocusedInputVisible(); }); });
   $("#pnl-period-picker")?.addEventListener("change", (event) => { state.pnlSelections[state.pnlPeriod] = event.target.value; renderRecords(calculateLedger(state.trades)); });
 }
 
@@ -1137,6 +1155,12 @@ function subscribeTrades(user) {
     render();
   }, (cause) => { console.error(cause); showToast("データを読み込めませんでした"); });
 }
+
+document.addEventListener("focusin", (event) => {
+  if (event.target.matches?.(KEYBOARD_SAFE_INPUT_SELECTOR)) keepFocusedInputVisible();
+});
+window.visualViewport?.addEventListener("resize", keepFocusedInputVisible);
+window.visualViewport?.addEventListener("scroll", keepFocusedInputVisible);
 
 $("#login-button").addEventListener("click", login);
 $("#open-buy").addEventListener("click", () => openBuy());

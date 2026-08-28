@@ -61,6 +61,7 @@ test("保有銘柄カードを3段構成にし数値と登録ボタンを同じ�
   assert.match(overviewSource, /\$\{position\.quantity\.toLocaleString\(\)\}株<\/strong><strong>\$\{yen\(position\.averagePrice, false\)\}/);
   assert.match(overviewSource, />売却記録を登録<\/button>/);
   assert.match(overviewSource, /position-row-footer[^>]*>[\s\S]*position-values[\s\S]*sale-register-button/);
+  assert.doesNotMatch(styles, /\.position-row\s*>\s*div\s*\{[^}]*display:\s*grid/);
   assert.match(styles, /\.position-row-footer\s*\{[^}]*width:\s*100%;[^}]*max-width:\s*100%;[^}]*display:\s*flex;[^}]*justify-content:\s*space-between;[^}]*flex-wrap:\s*nowrap;/s);
   assert.match(styles, /\.position-values\s*\{[^}]*min-width:\s*0;[^}]*max-width:\s*100%;[^}]*overflow:\s*hidden;[^}]*flex:\s*1 1 0;/s);
   assert.match(styles, /\.position-values strong\s*\{[^}]*font-size:\s*13px;[^}]*font-weight:\s*500;/s);
