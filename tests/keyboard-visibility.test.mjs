@@ -26,7 +26,7 @@ test("売買記録検索はinputを残したまま結果・件数・損益だけ
   assert.match(recordResults, /#record-result-summary/);
   assert.match(recordResults, /#record-groups/);
   assert.doesNotMatch(recordResults, /#records-view/);
-  assert.match(records, /search\?\.addEventListener\("input", \(event\) => \{ state\.recordQuery = event\.currentTarget\.value; renderRecordSearchResults\(calculateLedger\(state\.trades\)\); \}\)/);
+  assert.match(records, /search\?\.addEventListener\("input", \(event\) => \{ state\.recordSecurityCode = null; state\.recordQuery = event\.currentTarget\.value; renderRecordSearchResults\(calculateLedger\(state\.trades\)\); renderRecordSearchOptions\(\); \}\)/);
   assert.doesNotMatch(records, /focus\(|setSelectionRange|keepFocusedInputVisible/);
   assert.doesNotMatch(appSource, /touchmove/);
 });

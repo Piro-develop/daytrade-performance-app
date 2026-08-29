@@ -77,6 +77,7 @@ const state = {
   activeView: "overview",
   summaryFilters: { period: "all", style: "all", accountType: "all" },
   recordQuery: "",
+  recordSecurityCode: null,
   pnlPeriod: "day",
   pnlSelections: { day: localDate(), week: currentWeekStart(), month: localDate().slice(0, 7) },
   unsubscribe: null,
@@ -506,9 +507,37 @@ function pnlPeriodSelector(period, pickerId = "pnl-period-picker") {
   return `<label><span>${label}</span><select id="${pickerId}">${options.map((option) => `<option value="${option.value}" ${state.pnlSelections[period] === option.value ? "selected" : ""}>${option.label}</option>`).join("")}</select></label>`;
 }
 
+function recordSecurityCandidates() {
+  const securitiesByCode = new Map(state.securities.map((security) => [String(security.code ?? ""), security]));
+  const candidatesByCode = new Map();
+  state.trades.forEach((trade) => {
+    const code = String(trade.code ?? "").trim();
+    if (!code || candidatesByCode.has(code)) return;
+    const security = securitiesByCode.get(code);
+    candidatesByCode.set(code, { code, name: String(trade.name ?? security?.name ?? ""), reading: String(security?.reading ?? "") });
+  });
+  return [...candidatesByCode.values()].sort((a, b) => a.code.localeCompare(b.code, "ja", { numeric: true }));
+}
+
+function renderRecordSearchOptions() {
+  const search = $("#record-search");
+  const options = $("#record-search-options");
+  if (!search || !options) return;
+  const term = normalize(search.value);
+  const matches = recordSecurityCandidates().filter((candidate) => !term || normalize(`${candidate.code}${candidate.name}${candidate.reading}`).includes(term)).slice(0, 20);
+  options.innerHTML = matches.map((candidate) => `<button class="security-option record-search-option" data-action="choose-record-security" data-code="${esc(candidate.code)}" type="button"><strong>${esc(candidate.code)}</strong><span>${esc(candidate.name)}</span></button>`).join("");
+  options.classList.toggle("hidden", matches.length === 0);
+  search.setAttribute("aria-expanded", String(matches.length > 0));
+}
+
 function renderRecordSearchResults(ledger) {
   const term = normalize(state.recordQuery);
-  const records = [...ledger.calculated].filter((trade) => !term || normalize(`${trade.code}${trade.name}`).includes(term)).sort((a, b) => -byTimeAsc(a, b));
+  const candidatesByCode = new Map(recordSecurityCandidates().map((candidate) => [candidate.code, candidate]));
+  const records = [...ledger.calculated].filter((trade) => {
+    if (state.recordSecurityCode) return String(trade.code ?? "") === state.recordSecurityCode;
+    const reading = candidatesByCode.get(String(trade.code ?? ""))?.reading ?? "";
+    return !term || normalize(`${trade.code}${trade.name}${reading}`).includes(term);
+  }).sort((a, b) => -byTimeAsc(a, b));
   const recordGroups = [];
   records.forEach((trade) => {
     let group = recordGroups.at(-1);
@@ -550,11 +579,12 @@ function renderRecords(ledger) {
       <div class="pnl-period-selector">${pnlPeriodSelector(state.pnlPeriod)}</div>
       <strong class="${selectedPnl >= 0 ? "positive" : "negative"}">${yen(selectedPnl)}</strong><small class="tax-before-secondary">（税引前 ${yen(selectedTaxBefore)}）</small><small>${period.label} ・ SBI実績を優先・未入力分は概算</small></article>
     </div>
-    <div class="view-panel records-list-panel"><div class="records-toolbar"><label class="search-field">⌕<input id="record-search" class="keyboard-safe-input" value="${esc(state.recordQuery)}" placeholder="銘柄コード・銘柄名で検索"></label><div id="record-result-summary" class="record-summary"></div></div>
+    <div class="view-panel records-list-panel"><div class="records-toolbar"><div class="record-search-wrap"><label class="search-field">⌕<input id="record-search" class="keyboard-safe-input" value="${esc(state.recordQuery)}" autocomplete="off" aria-autocomplete="list" aria-controls="record-search-options" aria-expanded="false" placeholder="銘柄コード・銘柄名で検索"></label><div id="record-search-options" class="security-options record-search-options hidden" role="listbox"></div></div><div id="record-result-summary" class="record-summary"></div></div>
     <div id="record-groups" class="record-groups"></div></div>`;
   renderRecordSearchResults(ledger);
   const search = $("#record-search");
-  search?.addEventListener("input", (event) => { state.recordQuery = event.currentTarget.value; renderRecordSearchResults(calculateLedger(state.trades)); });
+  search?.addEventListener("focus", renderRecordSearchOptions);
+  search?.addEventListener("input", (event) => { state.recordSecurityCode = null; state.recordQuery = event.currentTarget.value; renderRecordSearchResults(calculateLedger(state.trades)); renderRecordSearchOptions(); });
   $("#pnl-period-picker")?.addEventListener("change", (event) => { state.pnlSelections[state.pnlPeriod] = event.target.value; renderRecords(calculateLedger(state.trades)); });
 }
 
@@ -1307,6 +1337,20 @@ document.addEventListener("click", async (event) => {
   if (action === "edit-position-lot") { const trade = state.trades.find((item) => item.id === target.dataset.id); if (trade) { closePositionLotModal(); openBuy(trade); } return; }
   if (action === "pnl-period") { state.pnlPeriod = target.dataset.period; renderRecords(calculateLedger(state.trades)); }
   if (action === "sell") openSell(target.dataset.code, target.dataset.style ?? "スイング", target.dataset.accountType ?? "現物", null, target.dataset.date ?? null);
+  if (action === "choose-record-security") {
+    const candidate = recordSecurityCandidates().find((item) => item.code === target.dataset.code);
+    const search = $("#record-search");
+    if (candidate && search) {
+      state.recordSecurityCode = candidate.code;
+      state.recordQuery = `${candidate.code}　${candidate.name}`;
+      search.value = state.recordQuery;
+      renderRecordSearchResults(calculateLedger(state.trades));
+      search.focus({ preventScroll: true });
+      $("#record-search-options")?.classList.add("hidden");
+      search.setAttribute("aria-expanded", "false");
+    }
+    return;
+  }
   if (action === "choose-security") { const security = state.securities.find((item) => item.code === target.dataset.code); state.form.selected = security; state.form.manual = false; $("#security-query").value = `${security.code}　${security.name}`; $("#security-options").classList.add("hidden"); $("#manual-fields").classList.add("hidden"); }
   if (action === "manual-security") { state.form.manual = true; state.form.selected = null; $("#security-options").classList.add("hidden"); $("#manual-fields").classList.remove("hidden"); $("#manual-code").focus(); }
   if (action === "edit") { const trade = state.trades.find((item) => item.id === target.dataset.id); if (trade) trade.action === "買付" ? openBuy(trade) : openSell(trade.code, trade.style, accountTypeOf(trade), trade); }
