@@ -564,9 +564,10 @@ function renderRecordSearchResults(ledger) {
     const afterTaxProfit = trade.realisedProfit === null ? null : afterTaxProfitOf(trade);
     const result = trade.action === "買付" ? "買付" : afterTaxProfit === null ? "確認要" : yen(afterTaxProfit);
     const resultClass = trade.action === "買付" ? "buy-text" : afterTaxProfit === null ? "muted" : afterTaxProfit >= 0 ? "positive" : "negative";
-    const taxBefore = trade.action === "売却" && trade.realisedProfit !== null ? `<small>（税引前 ${yen(trade.realisedProfit)}）・${afterTaxSourceLabel(trade)}</small>` : "";
+    const taxBefore = trade.action === "売却" && trade.realisedProfit !== null ? `<small>（税引前 ${yen(trade.realisedProfit)}）</small>` : "";
+    const priceLabel = trade.action === "買付" ? "買付価格" : "売却価格";
     const allocationStatus = trade.action === "売却" && accountTypeOf(trade) === "信用" && !trade.allocationConfirmed ? " ・ 返済建玉未確認" : "";
-    return `<div class="record-entry"><button class="record-entry-main" data-action="edit" data-id="${esc(trade.id)}" type="button"><span class="style-badge">${esc(trade.style)}</span><span class="record-security"><strong>${esc(trade.code)}</strong><span>${esc(trade.name)} ・ ${esc(accountDetailLabel(trade))}${allocationStatus}</span></span><span class="record-entry-result"><strong class="${resultClass}">${result}</strong>${taxBefore}</span><span class="record-chevron">›</span></button></div>`;
+    return `<div class="record-entry"><button class="record-entry-main" data-action="edit" data-id="${esc(trade.id)}" type="button"><span class="record-security"><strong>${esc(trade.code)}</strong><span>${esc(trade.name)}</span></span><span class="record-entry-meta"><span>${esc(accountDetailLabel(trade))}${allocationStatus}</span><span>${priceLabel} ${yen(trade.price, false)}</span></span><span class="record-entry-result"><strong class="${resultClass}">${result}</strong>${taxBefore}</span><span class="record-chevron">›</span></button></div>`;
   }).join("")}</div></section>`).join("") || `<div class="empty-state">該当する売買はありません</div>`;
 }
 
