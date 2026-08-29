@@ -35,6 +35,14 @@ const localDate = (date = new Date()) => `${date.getFullYear()}-${String(date.ge
 const currentWeekStart = () => { const date = new Date(); date.setHours(0, 0, 0, 0); const day = date.getDay(); date.setDate(date.getDate() - (day === 0 ? 6 : day - 1)); return localDate(date); };
 const yen = (value, signed = true) => `${signed && value > 0 ? "+ " : signed && value < 0 ? "− " : ""}${Math.abs(value).toLocaleString("ja-JP", { maximumFractionDigits: 0 })}円`;
 const normalize = (value) => String(value ?? "").normalize("NFKC").toLowerCase().replace(/[ァ-ヶ]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0x60)).replace(/[\s・（）()株式会社]/g, "");
+
+function securityMatchesSearch(security, query) {
+  const term = normalize(query);
+  if (!term) return true;
+  const aliases = Array.isArray(security?.aliases) ? security.aliases : security?.aliases ? [security.aliases] : [];
+  return [security?.code, security?.name, security?.reading, ...aliases].some((value) => normalize(value).includes(term));
+}
+
 const KEYBOARD_SAFE_INPUT_SELECTOR = ".keyboard-safe-input";
 let focusedInputFrame = 0;
 
@@ -514,7 +522,7 @@ function recordSecurityCandidates() {
     const code = String(trade.code ?? "").trim();
     if (!code || candidatesByCode.has(code)) return;
     const security = securitiesByCode.get(code);
-    candidatesByCode.set(code, { code, name: String(trade.name ?? security?.name ?? ""), reading: String(security?.reading ?? "") });
+    candidatesByCode.set(code, { code, name: String(trade.name ?? security?.name ?? ""), reading: String(security?.reading ?? ""), aliases: security?.aliases ?? [] });
   });
   return [...candidatesByCode.values()].sort((a, b) => a.code.localeCompare(b.code, "ja", { numeric: true }));
 }
@@ -523,20 +531,18 @@ function renderRecordSearchOptions() {
   const search = $("#record-search");
   const options = $("#record-search-options");
   if (!search || !options) return;
-  const term = normalize(search.value);
-  const matches = recordSecurityCandidates().filter((candidate) => !term || normalize(`${candidate.code}${candidate.name}${candidate.reading}`).includes(term)).slice(0, 20);
+  const matches = recordSecurityCandidates().filter((candidate) => securityMatchesSearch(candidate, search.value)).slice(0, 20);
   options.innerHTML = matches.map((candidate) => `<button class="security-option record-search-option" data-action="choose-record-security" data-code="${esc(candidate.code)}" type="button"><strong>${esc(candidate.code)}</strong><span>${esc(candidate.name)}</span></button>`).join("");
   options.classList.toggle("hidden", matches.length === 0);
   search.setAttribute("aria-expanded", String(matches.length > 0));
 }
 
 function renderRecordSearchResults(ledger) {
-  const term = normalize(state.recordQuery);
   const candidatesByCode = new Map(recordSecurityCandidates().map((candidate) => [candidate.code, candidate]));
   const records = [...ledger.calculated].filter((trade) => {
     if (state.recordSecurityCode) return String(trade.code ?? "") === state.recordSecurityCode;
-    const reading = candidatesByCode.get(String(trade.code ?? ""))?.reading ?? "";
-    return !term || normalize(`${trade.code}${trade.name}${reading}`).includes(term);
+    const candidate = candidatesByCode.get(String(trade.code ?? ""));
+    return securityMatchesSearch({ code: trade.code, name: trade.name, reading: candidate?.reading ?? "", aliases: candidate?.aliases ?? [] }, state.recordQuery);
   }).sort((a, b) => -byTimeAsc(a, b));
   const recordGroups = [];
   records.forEach((trade) => {
@@ -981,8 +987,9 @@ function closeModal() { $("#modal-backdrop").classList.add("hidden"); resetForm(
 
 function showSecurityOptions() {
   if (state.form.action !== "買付") return;
-  const term = normalize($("#security-query").value);
-  const matches = state.securities.filter((security) => !term || normalize(`${security.code}${security.name}${security.reading ?? ""}`).includes(term)).slice(0, 20);
+  const query = $("#security-query").value;
+  const term = normalize(query);
+  const matches = state.securities.filter((security) => securityMatchesSearch(security, query)).slice(0, 20);
   const options = $("#security-options");
   options.innerHTML = `${matches.map((security) => `<button class="security-option" data-action="choose-security" data-code="${esc(security.code)}" type="button"><strong>${esc(security.code)}</strong><span>${esc(security.name)}</span><small>${esc(security.market)}</small></button>`).join("")}${term ? '<button class="manual-option" data-action="manual-security" type="button">一覧にない銘柄を手動入力</button>' : ""}`;
   options.classList.remove("hidden");
@@ -1179,10 +1186,13 @@ async function login() {
 }
 
 async function loadStocks() {
-  const [response, readingResponse] = await Promise.all([fetch("./stocks.json"), fetch("./stock-readings.json")]);
-  if (!response.ok || !readingResponse.ok) throw new Error("銘柄一覧を読み込めませんでした");
-  const [data, readingData] = await Promise.all([response.json(), readingResponse.json()]);
-  state.securities = data.securities.map((security) => ({ ...security, reading: readingData.readings[security.code] ?? "" }));
+  const [response, readingResponse, aliasResponse] = await Promise.all([fetch("./stocks.json"), fetch("./stock-readings.json"), fetch("./stock-search-aliases.json")]);
+  if (!response.ok || !readingResponse.ok || !aliasResponse.ok) throw new Error("銘柄一覧を読み込めませんでした");
+  const [data, readingData, aliasData] = await Promise.all([response.json(), readingResponse.json(), aliasResponse.json()]);
+  state.securities = data.securities.map((security) => {
+    const aliases = aliasData.aliases?.[security.code] ?? [];
+    return { ...security, reading: readingData.readings[security.code] ?? "", aliases: Array.isArray(aliases) ? aliases : [aliases] };
+  });
   state.stocksAsOf = data.asOf.replaceAll("-", "/");
 }
 

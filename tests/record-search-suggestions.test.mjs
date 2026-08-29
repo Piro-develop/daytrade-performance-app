@@ -8,7 +8,7 @@ const candidatesSource = appSource.slice(appSource.indexOf("function recordSecur
 const optionsSource = appSource.slice(appSource.indexOf("function renderRecordSearchOptions"), appSource.indexOf("function renderRecordSearchResults"));
 const recordsSource = appSource.slice(appSource.indexOf("function renderRecordSearchResults"), appSource.indexOf("function renderAnalytics"));
 
-test("候補は過去tradeだけからコード単位で重複を除きreadingを補う", () => {
+test("候補は過去tradeだけからコード単位で重複を除きreadingとaliasを補う", () => {
   const state = {
     trades: [
       { code: "429A", name: "テクセンドフォトマスク" },
@@ -16,21 +16,20 @@ test("候補は過去tradeだけからコード単位で重複を除きreading�
       { code: "OLD1", name: "旧データ銘柄" }
     ],
     securities: [
-      { code: "429A", name: "テクセンドフォトマスク", reading: "テクセンドフォトマスク" },
+      { code: "429A", name: "テクセンドフォトマスク", reading: "テクセンドフォトマスク", aliases: ["てくせんど"] },
       { code: "9999", name: "未取引銘柄", reading: "ミトリヒキメイガラ" }
     ]
   };
   const candidates = new Function("state", `${candidatesSource}; return recordSecurityCandidates();`)(state);
   assert.deepEqual(candidates, [
-    { code: "429A", name: "テクセンドフォトマスク", reading: "テクセンドフォトマスク" },
-    { code: "OLD1", name: "旧データ銘柄", reading: "" }
+    { code: "429A", name: "テクセンドフォトマスク", reading: "テクセンドフォトマスク", aliases: ["てくせんど"] },
+    { code: "OLD1", name: "旧データ銘柄", reading: "", aliases: [] }
   ]);
 });
 
-test("候補と検索結果はコード・銘柄名・readingを既存normalizeで部分一致検索する", () => {
-  assert.match(optionsSource, /normalize\(search\.value\)/);
-  assert.match(optionsSource, /normalize\(`\$\{candidate\.code\}\$\{candidate\.name\}\$\{candidate\.reading\}`\)\.includes\(term\)/);
-  assert.match(recordsSource, /normalize\(`\$\{trade\.code\}\$\{trade\.name\}\$\{reading\}`\)\.includes\(term\)/);
+test("候補と検索結果はコード・銘柄名・reading・aliasを共通関数で部分一致検索する", () => {
+  assert.match(optionsSource, /securityMatchesSearch\(candidate, search\.value\)/);
+  assert.match(recordsSource, /securityMatchesSearch\(\{ code: trade\.code, name: trade\.name, reading: candidate\?\.reading \?\? "", aliases: candidate\?\.aliases \?\? \[\] \}, state\.recordQuery\)/);
   assert.match(optionsSource, /data-action="choose-record-security"/);
   assert.match(optionsSource, /<strong>\$\{esc\(candidate\.code\)\}<\/strong><span>\$\{esc\(candidate\.name\)\}<\/span>/);
 });
