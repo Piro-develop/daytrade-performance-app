@@ -22,8 +22,9 @@ test("取引日の入力欄を銘柄・取引区分と同じ全幅フォーム�
   assert.match(indexSource, /<label class="full">取引日<input id="trade-date" type="date" required><\/label>/);
   assert.match(indexSource, /<div class="form-choice full"><span>取引区分<\/span>/);
   assert.match(indexSource, /<label id="security-field" class="full">銘柄/);
-  assert.match(styles, /#trade-date\s*\{[^}]*display:\s*block;[^}]*width:\s*100%;[^}]*inline-size:\s*100%;[^}]*min-width:\s*0;[^}]*min-inline-size:\s*0;[^}]*max-width:\s*100%;[^}]*max-inline-size:\s*100%;[^}]*box-sizing:\s*border-box;/s);
-  assert.match(styles, /#trade-date::\-webkit-date-and-time-value\s*\{[^}]*min-width:\s*0;[^}]*text-align:\s*left;/s);
+  assert.match(styles, /#trade-date\s*\{[^}]*width:\s*100%;[^}]*box-sizing:\s*border-box;[^}]*padding-inline:\s*0;/s);
+  assert.match(styles, /#trade-date::\-webkit-date-and-time-value\s*\{[^}]*min-width:\s*0;[^}]*padding-inline-start:\s*12px;[^}]*text-align:\s*left;/s);
+  assert.doesNotMatch(styles, /#trade-date\s*\{[^}]*appearance:\s*none;/s);
 });
 
 test("長い銘柄名や設定文は親要素を押し広げず折り返す", () => {

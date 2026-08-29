@@ -20,9 +20,13 @@ test("Visual Viewport変化後もフォーカス中の入力欄を可視領域�
   assert.match(appSource, /field\.scrollIntoView\(\{ block: "center", inline: "nearest", behavior: "auto" \}\)/);
 });
 
-test("売買記録の再描画後も入力位置とカーソルを保ち強制スクロールを重ねない", () => {
-  assert.match(appSource, /next\?\.focus\(\{ preventScroll: true \}\)/);
-  assert.match(appSource, /next\?\.setSelectionRange\(state\.recordQuery\.length, state\.recordQuery\.length\)/);
-  assert.match(appSource, /keepFocusedInputVisible\(\)/);
+test("売買記録検索はinputを残したまま結果・件数・損益だけを更新する", () => {
+  const recordResults = appSource.slice(appSource.indexOf("function renderRecordSearchResults"), appSource.indexOf("function renderRecords"));
+  const records = appSource.slice(appSource.indexOf("function renderRecords"), appSource.indexOf("function renderAnalytics"));
+  assert.match(recordResults, /#record-result-summary/);
+  assert.match(recordResults, /#record-groups/);
+  assert.doesNotMatch(recordResults, /#records-view/);
+  assert.match(records, /search\?\.addEventListener\("input", \(event\) => \{ state\.recordQuery = event\.currentTarget\.value; renderRecordSearchResults\(calculateLedger\(state\.trades\)\); \}\)/);
+  assert.doesNotMatch(records, /focus\(|setSelectionRange|keepFocusedInputVisible/);
   assert.doesNotMatch(appSource, /touchmove/);
 });

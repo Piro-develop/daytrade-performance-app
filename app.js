@@ -506,7 +506,7 @@ function pnlPeriodSelector(period, pickerId = "pnl-period-picker") {
   return `<label><span>${label}</span><select id="${pickerId}">${options.map((option) => `<option value="${option.value}" ${state.pnlSelections[period] === option.value ? "selected" : ""}>${option.label}</option>`).join("")}</select></label>`;
 }
 
-function renderRecords(ledger) {
+function renderRecordSearchResults(ledger) {
   const term = normalize(state.recordQuery);
   const records = [...ledger.calculated].filter((trade) => !term || normalize(`${trade.code}${trade.name}`).includes(term)).sort((a, b) => -byTimeAsc(a, b));
   const recordGroups = [];
@@ -518,17 +518,31 @@ function renderRecords(ledger) {
     }
     group.trades.push(trade);
   });
+  const recordSales = records.filter((trade) => trade.action === "売却" && trade.realisedProfit !== null);
+  const recordTaxBefore = recordSales.reduce((sum, trade) => sum + trade.realisedProfit, 0);
+  const recordPnl = afterTaxTotalForTrades(recordSales);
+  const summary = $("#record-result-summary");
+  const groups = $("#record-groups");
+  if (!summary || !groups) return;
+  summary.innerHTML = `<span>${records.length}件</span><span class="record-summary-values"><strong class="${recordPnl>=0?"positive":"negative"}">${yen(recordPnl)}</strong><small>（税引前 ${yen(recordTaxBefore)}）</small></span>`;
+  groups.innerHTML = recordGroups.map((group) => `<section class="record-day"><h3>${japaneseDate(group.date)}</h3><div class="record-day-list">${group.trades.map((trade) => {
+    const afterTaxProfit = trade.realisedProfit === null ? null : afterTaxProfitOf(trade);
+    const result = trade.action === "買付" ? "買付" : afterTaxProfit === null ? "確認要" : yen(afterTaxProfit);
+    const resultClass = trade.action === "買付" ? "buy-text" : afterTaxProfit === null ? "muted" : afterTaxProfit >= 0 ? "positive" : "negative";
+    const taxBefore = trade.action === "売却" && trade.realisedProfit !== null ? `<small>（税引前 ${yen(trade.realisedProfit)}）・${afterTaxSourceLabel(trade)}</small>` : "";
+    const allocationStatus = trade.action === "売却" && accountTypeOf(trade) === "信用" && !trade.allocationConfirmed ? " ・ 返済建玉未確認" : "";
+    return `<div class="record-entry"><button class="record-entry-main" data-action="edit" data-id="${esc(trade.id)}" type="button"><span class="style-badge">${esc(trade.style)}</span><span class="record-security"><strong>${esc(trade.code)}</strong><span>${esc(trade.name)} ・ ${esc(accountDetailLabel(trade))}${allocationStatus}</span></span><span class="record-entry-result"><strong class="${resultClass}">${result}</strong>${taxBefore}</span><span class="record-chevron">›</span></button></div>`;
+  }).join("")}</div></section>`).join("") || `<div class="empty-state">該当する売買はありません</div>`;
+}
+
+function renderRecords(ledger) {
   const completed = ledger.calculated.filter((trade) => trade.action === "売却" && trade.realisedProfit !== null);
   const period = pnlRange(state.pnlPeriod);
   const selectedTrades = completed.filter((trade) => trade.date >= period.start && trade.date <= period.end);
-  const recordSales = records.filter((trade) => trade.action === "売却" && trade.realisedProfit !== null);
   const totalTaxBefore = completed.reduce((sum, trade) => sum + trade.realisedProfit, 0);
   const selectedTaxBefore = selectedTrades.reduce((sum, trade) => sum + trade.realisedProfit, 0);
-  const recordTaxBefore = recordSales.reduce((sum, trade) => sum + trade.realisedProfit, 0);
   const totalPnl = afterTaxTotalForTrades(completed);
   const selectedPnl = afterTaxTotalForTrades(selectedTrades);
-  const recordPnl = afterTaxTotalForTrades(recordSales);
-  const positions = new Map(ledger.positions.map((position) => [position.code, position]));
   $("#records-view").innerHTML = `
     <div class="pnl-overview">
       <article class="pnl-card"><div><p class="section-kicker">TOTAL PROFIT / LOSS</p><h2>全期間の累計税引後損益</h2></div><strong class="${totalPnl >= 0 ? "positive" : "negative"}">${yen(totalPnl)}</strong><small class="tax-before-secondary">（税引前 ${yen(totalTaxBefore)}）</small><small>SBI実績を優先・未入力分は年間損益通算による概算</small></article>
@@ -536,17 +550,11 @@ function renderRecords(ledger) {
       <div class="pnl-period-selector">${pnlPeriodSelector(state.pnlPeriod)}</div>
       <strong class="${selectedPnl >= 0 ? "positive" : "negative"}">${yen(selectedPnl)}</strong><small class="tax-before-secondary">（税引前 ${yen(selectedTaxBefore)}）</small><small>${period.label} ・ SBI実績を優先・未入力分は概算</small></article>
     </div>
-    <div class="view-panel records-list-panel"><div class="records-toolbar"><label class="search-field">⌕<input id="record-search" class="keyboard-safe-input" value="${esc(state.recordQuery)}" placeholder="銘柄コード・銘柄名で検索"></label><div class="record-summary"><span>${records.length}件</span><span class="record-summary-values"><strong class="${recordPnl>=0?"positive":"negative"}">${yen(recordPnl)}</strong><small>（税引前 ${yen(recordTaxBefore)}）</small></span></div></div>
-    <div class="record-groups">${recordGroups.map((group) => `<section class="record-day"><h3>${japaneseDate(group.date)}</h3><div class="record-day-list">${group.trades.map((trade) => {
-      const afterTaxProfit = trade.realisedProfit === null ? null : afterTaxProfitOf(trade);
-      const result = trade.action === "買付" ? "買付" : afterTaxProfit === null ? "確認要" : yen(afterTaxProfit);
-      const resultClass = trade.action === "買付" ? "buy-text" : afterTaxProfit === null ? "muted" : afterTaxProfit >= 0 ? "positive" : "negative";
-      const taxBefore = trade.action === "売却" && trade.realisedProfit !== null ? `<small>（税引前 ${yen(trade.realisedProfit)}）・${afterTaxSourceLabel(trade)}</small>` : "";
-      const allocationStatus = trade.action === "売却" && accountTypeOf(trade) === "信用" && !trade.allocationConfirmed ? " ・ 返済建玉未確認" : "";
-      return `<div class="record-entry"><button class="record-entry-main" data-action="edit" data-id="${esc(trade.id)}" type="button"><span class="style-badge">${esc(trade.style)}</span><span class="record-security"><strong>${esc(trade.code)}</strong><span>${esc(trade.name)} ・ ${esc(accountDetailLabel(trade))}${allocationStatus}</span></span><span class="record-entry-result"><strong class="${resultClass}">${result}</strong>${taxBefore}</span><span class="record-chevron">›</span></button></div>`;
-    }).join("")}</div></section>`).join("") || `<div class="empty-state">該当する売買はありません</div>`}</div></div>`;
+    <div class="view-panel records-list-panel"><div class="records-toolbar"><label class="search-field">⌕<input id="record-search" class="keyboard-safe-input" value="${esc(state.recordQuery)}" placeholder="銘柄コード・銘柄名で検索"></label><div id="record-result-summary" class="record-summary"></div></div>
+    <div id="record-groups" class="record-groups"></div></div>`;
+  renderRecordSearchResults(ledger);
   const search = $("#record-search");
-  search?.addEventListener("input", (event) => { state.recordQuery = event.target.value; renderRecords(calculateLedger(state.trades)); requestAnimationFrame(() => { const next = $("#record-search"); next?.focus({ preventScroll: true }); next?.setSelectionRange(state.recordQuery.length, state.recordQuery.length); keepFocusedInputVisible(); }); });
+  search?.addEventListener("input", (event) => { state.recordQuery = event.currentTarget.value; renderRecordSearchResults(calculateLedger(state.trades)); });
   $("#pnl-period-picker")?.addEventListener("change", (event) => { state.pnlSelections[state.pnlPeriod] = event.target.value; renderRecords(calculateLedger(state.trades)); });
 }
 

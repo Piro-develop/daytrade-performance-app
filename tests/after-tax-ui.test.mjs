@@ -7,7 +7,7 @@ const profitDisplaySource = await readFile(new URL("../profit-display.mjs", impo
 
 const between = (start, end) => appSource.slice(appSource.indexOf(start), appSource.indexOf(end));
 const overview = between("function renderOverview", "function parseLocalDate");
-const records = between("function renderRecords", "function renderAnalytics");
+const records = between("function renderRecordSearchResults", "function renderAnalytics");
 const analytics = between("function renderAnalytics", "function renderSettings");
 const preview = between("function updateSalePreview", "function renderCreditLotSelector");
 

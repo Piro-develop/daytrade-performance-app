@@ -73,10 +73,12 @@ textarea {
   max-width: 100%;
   max-inline-size: 100%;
   box-sizing: border-box;
+  padding-inline: 0;
 }
 
 #trade-date::-webkit-date-and-time-value {
   min-width: 0;
+  padding-inline-start: 12px;
   text-align: left;
 }
 
