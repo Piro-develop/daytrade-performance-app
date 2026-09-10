@@ -10,6 +10,7 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="stylesheet" href="./styles.css">
   <link rel="stylesheet" href="./credit-styles.css">
+  <link rel="stylesheet" href="./investment.css">
 </head>
 <body>
   <div id="boot" class="boot-screen"><div class="spinner"></div><p>アプリを準備しています…</p></div>
@@ -25,6 +26,7 @@
       </button>
       <small>取引データは、ログインしたご本人だけが閲覧できます。</small>
       <p id="login-error" class="error-message" role="alert"></p>
+      <a id="investment-guest-link" class="secondary-button hidden" href="./decision/">新規銘柄判定を試す（統合UAT）</a>
     </div>
   </section>
 
@@ -35,6 +37,7 @@
         <button class="nav-item active" data-view="overview" type="button"><i>⌁</i><span>サマリ</span></button>
         <button class="nav-item" data-view="records" type="button"><i>▤</i><span>売買記録</span></button>
         <button class="nav-item" data-view="analytics" type="button"><i>◔</i><span>分析</span></button>
+        <button class="nav-item" data-view="investment" type="button"><i>◎</i><span>新規銘柄判定</span></button>
       </nav>
       <button class="nav-item settings-nav" data-view="settings" type="button"><i>⚙</i><span>設定</span></button>
     </aside>
@@ -54,6 +57,10 @@
       <section id="overview-view" class="app-view"></section>
       <section id="records-view" class="app-view hidden"></section>
       <section id="analytics-view" class="app-view hidden"></section>
+      <section id="investment-view" class="app-view hidden">
+        <div class="investment-toolbar"><p id="investment-status" role="status">判定機能の接続を確認しています…</p><a id="investment-fullscreen" class="secondary-button hidden" href="./decision/">画面を広く使う</a></div>
+        <iframe id="investment-frame" class="hidden" title="新規銘柄判定・実銘柄検証" allow="clipboard-write" referrerpolicy="same-origin"></iframe>
+      </section>
       <section id="settings-view" class="app-view hidden"></section>
     </main>
   </div>
@@ -164,5 +171,6 @@
 
   <div id="toast" class="toast hidden" role="status"></div>
   <script type="module" src="./app.js"></script>
+  <script type="module" src="./investment.mjs"></script>
 </body>
 </html>

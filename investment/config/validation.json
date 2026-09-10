@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "min_symbols": 5,
+  "max_symbols": 10,
+  "judgment_agreement_min": 0.8,
+  "pairwise_rank_concordance_min": 0.8,
+  "top3_overlap_min": 2,
+  "major_reason_agreement_min": 0.8,
+  "unresolved_critical_disagreements_max": 0,
+  "categories": [
+    "データ不足",
+    "採点基準",
+    "支持抵抗判定",
+    "RR",
+    "定性評価",
+    "Decision Engine"
+  ],
+  "max_csv_bytes": 10000000
+}

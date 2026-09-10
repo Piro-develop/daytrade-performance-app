@@ -1,2 +1,15 @@
 backups/
 scripts/trades-migration-20260824.mjs
+
+.venv/
+.runtime/
+.pytest_cache/
+.pytest_tmp/
+__pycache__/
+*.pyc
+*.sqlite
+*.sqlite-*
+*.db
+*.log
+.env
+.streamlit/secrets.toml

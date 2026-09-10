@@ -1,0 +1,42 @@
+{
+  "symbol": "",
+  "name": "",
+  "as_of": "",
+  "is_demo": false,
+  "evidence": [],
+  "assessments": [],
+  "evidence_quality": {},
+  "tick_size": null,
+  "tick_evidence_id": "",
+  "earnings_at": null,
+  "earnings_evidence_ids": [],
+  "latest_financial": {
+    "latest_confirmed": false,
+    "period": "",
+    "evidence_ids": []
+  },
+  "preflight_review": {},
+  "macro": {
+    "sector": "",
+    "sector_condition": "",
+    "drivers": [],
+    "company_sensitivity": "",
+    "specific_factors": "",
+    "dominant_force": "",
+    "evidence_ids": []
+  },
+  "warnings": [],
+  "severe_conditions": {},
+  "dominant_factor": {},
+  "calendar": [],
+  "volume_profile": [],
+  "valuation_plan": {},
+  "exit_conditions": [],
+  "intraday_bars": [],
+  "intraday_interval": "5m",
+  "intraday_closed_confirmed": false,
+  "intraday_evidence_id": "",
+  "today_material_evidence_ids": [],
+  "same_time_volume_evidence_ids": [],
+  "execution_evidence_ids": []
+}

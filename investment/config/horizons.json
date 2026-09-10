@@ -1,0 +1,57 @@
+{
+  "version": "multi-1.0.0",
+  "monthly_min": 24,
+  "day_fresh_minutes": 5,
+  "day_provisional_minutes": 15,
+  "market_close": "15:30",
+  "network_timeout": 15,
+  "network_max_bytes": 5000000,
+  "midlong": {
+    "investment_weights": {
+      "A": 25,
+      "B": 15,
+      "C": 13,
+      "D": 12,
+      "E": 10,
+      "F": 8,
+      "G": 7,
+      "H": 6,
+      "I": 2,
+      "J": 2
+    },
+    "entry_weights": {
+      "A": 25,
+      "B": 20,
+      "C": 15,
+      "D": 15,
+      "E": 10,
+      "F": 10,
+      "G": 5
+    },
+    "prefix": "ML",
+    "entry_prefix": "ME",
+    "context_prefix": "MC",
+    "context_count": 5
+  },
+  "daytrade": {
+    "investment_weights": {
+      "A": 30,
+      "B": 20,
+      "C": 20,
+      "D": 15,
+      "E": 15
+    },
+    "entry_weights": {
+      "A": 20,
+      "B": 20,
+      "C": 20,
+      "D": 20,
+      "E": 10,
+      "F": 10
+    },
+    "prefix": "DT",
+    "entry_prefix": "DE",
+    "context_prefix": "DC",
+    "context_count": 4
+  }
+}

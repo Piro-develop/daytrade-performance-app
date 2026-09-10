@@ -1,0 +1,168 @@
+{
+  "config_version": "swing-1.0.0",
+  "schema_version": 1,
+  "mix": [
+    0.7,
+    0.3
+  ],
+  "anchors": [
+    1,
+    4,
+    6,
+    8,
+    10
+  ],
+  "investment_weights": {
+    "A": 20,
+    "B": 16,
+    "C": 16,
+    "D": 14,
+    "E": 10,
+    "F": 11,
+    "G": 5,
+    "H": 4,
+    "I": 2,
+    "J": 2
+  },
+  "entry_weights": {
+    "A": 23,
+    "B": 22,
+    "C": 20,
+    "D": 15,
+    "E": 10,
+    "F": 5,
+    "G": 5
+  },
+  "subweights": {
+    "A": [
+      40,
+      25,
+      20,
+      15
+    ],
+    "D": [
+      35,
+      30,
+      20,
+      15
+    ],
+    "E": [
+      35,
+      35,
+      15,
+      15
+    ]
+  },
+  "daily_ma": [
+    13,
+    25,
+    50,
+    75
+  ],
+  "weekly_ma": [
+    13,
+    26,
+    52
+  ],
+  "weekly_min": 58,
+  "atr_period": 14,
+  "rsi_period": 14,
+  "bb_period": 20,
+  "bb_deviation": 2,
+  "pivot_span": 2,
+  "major_span": 13,
+  "slope_periods": 4,
+  "daily_lookback": 260,
+  "weekly_lookback": 156,
+  "cluster_atr": 0.15,
+  "min_cluster_ticks": 2,
+  "timeframe_weights": {
+    "1d": 1,
+    "1w": 3
+  },
+  "source_weights": {
+    "major_pivot": 3,
+    "pivot": 2,
+    "gap": 2,
+    "volume_profile": 3,
+    "ma": 1,
+    "bb": 1,
+    "fib": 0.5,
+    "round_number": 0.5
+  },
+  "reaction_weight": 0.5,
+  "reaction_cap": 4,
+  "recency_bars": [
+    5,
+    20
+  ],
+  "family_bonus": 0.5,
+  "family_bonus_cap": 2,
+  "strong_band": 7,
+  "stop_buffer_atr": 0.1,
+  "stop_buffer_ticks": 1,
+  "rr_good": 2,
+  "rr_conditional": 1.5,
+  "under7": 0.07,
+  "pullback_search": 0.1,
+  "rr_knots": [
+    [
+      0,
+      1
+    ],
+    [
+      1,
+      4
+    ],
+    [
+      1.5,
+      6
+    ],
+    [
+      2,
+      8
+    ],
+    [
+      3,
+      10
+    ]
+  ],
+  "upside_knots": [
+    [
+      0,
+      1
+    ],
+    [
+      3,
+      4
+    ],
+    [
+      5,
+      6
+    ],
+    [
+      7,
+      8
+    ],
+    [
+      10,
+      10
+    ]
+  ],
+  "volume_trigger_ratio": 1.5,
+  "plan_valid_hours": 24,
+  "round_number_step": 100,
+  "comparison_days": 20,
+  "rsi_overheated": 75,
+  "support_distance_atr": [
+    2,
+    4,
+    6
+  ],
+  "confidence": {
+    "fresh": 1,
+    "constrained": 0.5,
+    "missing": 0
+  },
+  "rsi_method": "rolling_simple"
+}

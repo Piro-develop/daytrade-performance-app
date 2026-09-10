@@ -99,6 +99,7 @@ const headings = {
   overview: ["投資運用記録", "デイトレ・スイングの振り返りと成績"],
   records: ["売買記録", "買付から売却までの履歴を確認"],
   analytics: ["パフォーマンス分析", "確定した損益の傾向と改善ポイント"],
+  investment: ["新規銘柄判定", "投資妙味・Entry品質と売買条件を確認"],
   settings: ["設定", "表示とデータ管理"]
 };
 
@@ -630,7 +631,8 @@ function switchView(view) {
   $("#page-title").textContent = headings[view][0];
   $("#page-subtitle").textContent = headings[view][1];
 
-  $("#open-buy").classList.toggle("hidden", view === "settings");
+  $("#open-buy").classList.toggle("hidden", view === "settings" || view === "investment");
+  if (view === "investment") window.dispatchEvent(new Event("investment:open"));
   if (changed) requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: "auto" }));
 }
 
