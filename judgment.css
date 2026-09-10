@@ -1,0 +1,69 @@
+/* Native judgment view; the existing tracker palette and bottom navigation are shared. */
+.judgment{min-width:0;max-width:100%}
+.judgment .panel{margin-bottom:16px}
+.judgment h2{font-size:20px;margin:0 0 16px}
+.judgment h3{font-size:15px;margin:15px 0 8px}
+.judgment p,.judgment li{font-size:13px;line-height:1.7;overflow-wrap:anywhere}
+.judgment small{overflow-wrap:anywhere;color:var(--muted)}
+.j-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:14px 0}
+.judgment label{display:grid;align-content:start;gap:7px;font-size:12px;color:var(--muted);min-width:0}
+.judgment input,.judgment select,.judgment textarea{width:100%;min-width:0;max-width:100%;min-height:44px;background:#0d1c16;color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:10px;font:inherit;font-size:16px}
+.judgment textarea{resize:vertical;line-height:1.6}
+.judgment .j-check{display:flex;align-items:center;gap:10px;min-height:44px;line-height:1.6}
+.judgment .j-check input{width:20px;min-height:20px;flex:0 0 20px}
+.j-detail{border:1px solid var(--line);border-radius:12px;margin:12px 0;background:rgba(8,20,14,.3)}
+.j-detail summary{min-height:48px;padding:15px;cursor:pointer;font-size:13px;font-weight:600;line-height:1.5;overflow-wrap:anywhere}
+.j-detail-body{padding:0 15px 15px;min-width:0}
+.j-detail-body>label{margin:14px 0}
+.j-actions{display:flex;flex-wrap:wrap;gap:10px;margin:18px 0}
+.judgment button{min-height:44px;white-space:normal}
+.judgment button:disabled{opacity:.5;cursor:wait}
+.judgment [data-approval]:disabled{cursor:not-allowed}
+.j-result-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.j-result-head h2{overflow-wrap:anywhere}
+.j-verdict{display:flex;align-items:center;gap:16px;margin:16px 0;padding:15px;background:#152e20;border:1px solid #2e513c;border-radius:12px}
+.j-verdict strong{font-size:24px}.j-verdict span{font-size:12px;color:var(--muted)}
+.j-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}
+.j-metric{padding:12px;background:#102219;border:1px solid var(--line);border-radius:9px;min-width:0}
+.j-metric span{display:block;font-size:11px;color:var(--muted);margin-bottom:6px}
+.j-metric strong{font-size:17px;overflow-wrap:anywhere}
+.j-muted{color:var(--muted)}
+.j-concern{padding:12px;background:#30281b;border-radius:9px;color:#efd6a6}
+.j-error{color:#ffb0a2}
+.j-evidence,.j-finding{padding:12px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+.j-evidence strong,.j-finding b{font-size:13px}
+.j-horizons{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.j-mini{padding:12px;border:1px solid var(--line);border-radius:8px}
+.j-history-row{width:100%;padding:12px;background:transparent;border:0;border-bottom:1px solid var(--line);color:var(--ink);text-align:left;display:grid;gap:6px}
+.judgment :focus-visible{outline:2px solid var(--green2);outline-offset:3px}
+@media(max-width:720px){
+ .sidebar nav{grid-template-columns:repeat(4,minmax(0,1fr));gap:0}
+ .settings-nav{flex:0 0 18%;width:auto}
+ .sidebar .nav-item{padding:4px 1px;font-size:10px;min-width:0}
+ .sidebar .nav-item span{white-space:nowrap}
+ .j-grid{grid-template-columns:1fr}
+ .j-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .j-horizons{grid-template-columns:1fr}
+ .j-result-head,.j-verdict{flex-direction:column;gap:8px}
+ .j-result-head .secondary-button{font-size:12px}
+ .j-metric{padding:10px}.j-metric strong{font-size:16px}
+ .j-detail summary{padding:13px 10px}.j-detail-body{padding:0 10px 12px}
+}
+
+@media(max-width:720px){
+ .main-content:has(#investment-view:not(.hidden)){padding-top:16px}
+ .main-content:has(#investment-view:not(.hidden)) .page-header{margin-bottom:14px}
+ .j-result-head{flex-direction:row;align-items:center;gap:8px}
+ .j-result-head .section-kicker{display:none}
+ .j-result-head h2{font-size:15px;margin:0;line-height:1.5}
+ .j-result-head .secondary-button{flex:0 0 auto;font-size:10px;padding:8px}
+ .j-result .j-verdict{margin:10px 0;padding:10px;gap:4px}
+ .j-result .j-verdict strong{font-size:19px;line-height:1.5}
+ .j-result .j-verdict span{font-size:11px}
+ .j-result .j-metrics{gap:6px}
+ .j-result .j-metric{padding:8px}
+ .j-result .j-metric span{font-size:10px;margin-bottom:3px}
+ .j-result .j-metric strong{font-size:15px}
+ .j-result .j-concern{padding:9px;font-size:11px;line-height:1.5;margin:9px 0}
+ .j-result #j-recommendation{font-size:11px;line-height:1.5;margin:9px 0}
+}

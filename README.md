@@ -1,28 +1,34 @@
 # デイトレ・スイング投資運用成績トラッカー
 
-運用成績・売買履歴の管理に「新規銘柄判定」を統合した個人用UAT版です。
-従来のFirebase保存を維持し、投資判定はPythonの計算処理と専用履歴を使用します。
+運用成績・売買履歴の管理に、通常タブの「銘柄判断」を統合しています。
+Googleログインと銘柄辞書を共有し、判定処理は同梱のPythonコードを再利用します。
 
-## 起動
+## 通常アプリの起動
 
 正規リポジトリのPowerShellで実行します。
-初回準備・アクセスコード・スマホ接続は [統合UATガイド](docs/INTEGRATED_UAT.md) を参照してください。
 
 ~~~powershell
-.\start-uat.ps1 -Lan
+.\start-app.ps1
 ~~~
 
-PCは http://127.0.0.1:8765/ 、スマホは起動時に表示するLAN用URLへアクセスします。
-入口のアクセスコードは起動ターミナルまたは .runtime/uat-access.html にあります。
+PCのURLは [通常アプリ](http://127.0.0.1:8766/) です。
+Googleログイン後、下部または左側の［銘柄判断］を開きます。
+アクセスコード・別のUAT画面・Streamlitの埋め込みは使いません。
 停止は起動ターミナルで Ctrl+C です。
+
+初回準備、公開、スマホ接続、保存先は [本番統合ガイド](docs/PRODUCTION_INTEGRATION.md) を参照してください。
+現在のGitHub Pagesへ新機能を反映するには、Python APIのHTTPS公開先を設定する必要があります。
+ローカル起動の確認と、インターネット公開の完了は区別しています。
 
 ## 構成
 
-- index.html / app.js / *.mjs：従来の運用成績・売買管理
-- investment/：判定の正本、Python処理、入力、3時間軸評価、履歴、実銘柄比較
-- investment.mjs / investment.css：トラッカー内の判定メニューと画面
-- uat_server.py：同じURLで両機能を提供する個人用UATサーバー
-- [統合設計](docs/INTEGRATION_DESIGN.md)、[確認結果](docs/INTEGRATION_RESULT.md)
+- index.html / app.js / 既存mjs：従来の運用成績・売買管理
+- judgment.mjs / judgment.css：通常タブの入力、結果、履歴
+- app_server.py / judgment/：本人確認、既存判定コードへの接続、本人別保存
+- investment/：正本仕様、計算、Provider、検証コードとデータ
+- judgment-config.json：画面から判定APIへの接続先
+- [本番統合の確認結果](docs/PRODUCTION_INTEGRATION_RESULT.md)
 
-既存GitHub PagesだけではPython処理を実行できません。将来の外部公開にはPrivateリポジトリ、
-HTTPS、認証、永続保存先の設定を確認します。現時点の統合UATはPC／同じWi-Fiで利用します。
+従来のFirebase設定・Firestore保存先・売買データは変更していません。
+旧UAT用のコードと検証資料は開発用に保持しています。
+旧iframe用 investment.mjs / investment.css は通常タブへの置換に伴い削除しました。

@@ -4,14 +4,14 @@ from datetime import datetime, timezone
 import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
-import uat_server
-from uat_server import public_path
+import web_assets
+from web_assets import public_path
 from investment_app.integration_ui import selected_result
 from investment_app.uat_service import demo,bundle_from_input,run_all
 from investment_app.storage import History
 
 def test_private_files_are_never_served(tmp_path,monkeypatch):
-    monkeypatch.setattr(uat_server,"ROOT",tmp_path)
+    monkeypatch.setattr(web_assets,"ROOT",tmp_path)
     (tmp_path/"index.html").write_text("public")
     (tmp_path/"assets/icons").mkdir(parents=True)
     (tmp_path/"assets/icons/icon.png").write_bytes(b"public icon")

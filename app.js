@@ -1,3 +1,4 @@
+import { createJudgment } from "./judgment.mjs";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
 import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
@@ -92,6 +93,8 @@ const state = {
   form: { mode: "new", action: "買付", editId: null, selected: null, manual: false, sellContext: null, interestDayOverrides: {}, positionAllocations: {}, allocationMethod: ALLOCATION_SETTINGS.defaultMethod, allocationGroup: "", allocationTouched: false, availableCreditLots: [], availableCreditGroups: [], evaluationPrice: "", tradingUnit: ALLOCATION_SETTINGS.defaultTradingUnit, evaluationProfitOverrides: {}, evaluationExpenseOverrides: {} }
 };
 
+const judgment = createJudgment($("#investment-view"), () => state.user, () => state.securities);
+
 const pendingDeletionIds = new Set();
 let deletionTradeId = null;
 
@@ -99,7 +102,7 @@ const headings = {
   overview: ["投資運用記録", "デイトレ・スイングの振り返りと成績"],
   records: ["売買記録", "買付から売却までの履歴を確認"],
   analytics: ["パフォーマンス分析", "確定した損益の傾向と改善ポイント"],
-  investment: ["新規銘柄判定", "投資妙味・Entry品質と売買条件を確認"],
+  investment: ["銘柄判断", "投資妙味・Entry品質と売買条件を確認"],
   settings: ["設定", "表示とデータ管理"]
 };
 
@@ -632,7 +635,7 @@ function switchView(view) {
   $("#page-subtitle").textContent = headings[view][1];
 
   $("#open-buy").classList.toggle("hidden", view === "settings" || view === "investment");
-  if (view === "investment") window.dispatchEvent(new Event("investment:open"));
+  if (view === "investment") judgment.open();
   if (changed) requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: "auto" }));
 }
 
@@ -1375,6 +1378,7 @@ try { await loadStocks(); }
 catch (cause) { console.error(cause); $("#login-error").textContent = "銘柄一覧を読み込めませんでした。ページを再読み込みしてください。"; }
 
 onAuthStateChanged(auth, (user) => {
+  judgment.reset();
   $("#boot").classList.add("hidden");
   if (!user) {
     state.user = null; state.trades = []; state.unsubscribe?.();
