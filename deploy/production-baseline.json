@@ -1,0 +1,11 @@
+{
+  "recorded_on": "2026-09-11",
+  "repository": "https://github.com/Piro-develop/daytrade-performance-app.git",
+  "public_url": "https://piro-develop.github.io/daytrade-performance-app/",
+  "remote_main": "c0d69f0b7001a9dc9e5a71a537dbbe2b4b698b40",
+  "pages_commit": "c0d69f0b7001a9dc9e5a71a537dbbe2b4b698b40",
+  "rollback_tag": "rollback-before-stock-judgment-20260911",
+  "local_integrated_candidate": "89e6eed320ea85abf5b1a3a229258211402e8384",
+  "backend_url": null,
+  "release_status": "waiting_for_host_account_and_paid_service_authorization"
+}

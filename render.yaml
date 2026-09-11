@@ -1,0 +1,20 @@
+# DRAFT: creates a paid service. Obtain the user's billing approval before applying.
+# Keep this on a staging branch first; do not change Pages until the API is verified.
+services:
+  - type: web
+    name: daytrade-judgment-api
+    runtime: docker
+    plan: 0.5c-512mb
+    region: singapore
+    numInstances: 1
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    autoDeployTrigger: off
+    healthCheckPath: /healthz
+    disk:
+      name: judgment-history
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: JUDGMENT_DATA_DIR
+        value: /var/data/trading-journal

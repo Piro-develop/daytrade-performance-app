@@ -1,0 +1,15 @@
+**
+!Dockerfile
+!deploy/
+!deploy/requirements-backend.txt
+!app_server.py
+!web_assets.py
+!app.js
+!judgment/
+!judgment/*.py
+!investment/
+!investment/src/
+!investment/src/investment_app/
+!investment/src/investment_app/*.py
+!investment/config/
+!investment/config/*.json

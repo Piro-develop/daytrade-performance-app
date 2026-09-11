@@ -32,3 +32,5 @@ Googleログイン後、下部または左側の［銘柄判断］を開きま�
 従来のFirebase設定・Firestore保存先・売買データは変更していません。
 旧UAT用のコードと検証資料は開発用に保持しています。
 旧iframe用 investment.mjs / investment.css は通常タブへの置換に伴い削除しました。
+
+本番反映の準備状況とrollbackは [公開リリース手順](docs/PRODUCTION_RELEASE.md) を参照してください。
