@@ -38,6 +38,9 @@ def run_all(bundle,history,policy="unspecified",entry=None):
     return results
 
 def save_group(history,pending):
+    # Storage adapters can atomically persist the same engine snapshots remotely.
+    if hasattr(history, "save_group"):
+        return history.save_group(pending)
     from datetime import datetime,timezone
     from .models import canonical,InputError
     with history.connect() as db:

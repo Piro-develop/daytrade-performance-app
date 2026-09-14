@@ -17,6 +17,7 @@ from starlette.responses import FileResponse,JSONResponse,Response
 from starlette.routing import Route
 from judgment.auth import FirebaseIdentity,AuthenticationError
 from judgment.service import JudgmentService
+from judgment.firestore_store import FirestoreHistory
 from investment_app.models import InputError,plain
 from investment_app.uat_service import recommendation
 from web_assets import public_path
@@ -26,9 +27,8 @@ def present(result):
     h=result['metadata'].get('horizon','swing')
     return dict(result,presentation={k:selected_result({h:result},h,k) for k in result['decisions']})
 
-def create_app(directory,identity=None,origins=()):
+def create_app(directory=None,identity=None,origins=(),store_factory=None):
     identity=identity or FirebaseIdentity(ROOT)
-    service=JudgmentService(directory)
     async def api(request):
         headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff"}
         try:
@@ -37,6 +37,8 @@ def create_app(directory,identity=None,origins=()):
             uid=await asyncio.to_thread(identity.verify,bearer[7:])
         except AuthenticationError as exc:
             return JSONResponse({"error":str(exc)},status_code=401,headers=headers)
+        # Local storage is available only through explicit offline test injection, never the production CLI.
+        service=JudgmentService(directory) if directory is not None else JudgmentService(store=(store_factory(uid,bearer[7:]) if store_factory else FirestoreHistory(identity.project,uid,bearer[7:])))
         try:
             payload={}
             if request.method=="POST":
@@ -51,6 +53,7 @@ def create_app(directory,identity=None,origins=()):
             method=request.method
             def execute():
                 if method=="GET" and action=="catalog": return service.catalog()
+                if method=="GET" and action.startswith("images/"): return service.history(uid).get_image(action[7:])
                 if method=="GET" and action=="history": return service.list_runs(uid)
                 if method=="GET" and action.startswith("runs/"): return present(service.get(uid,action[5:]))
                 if method=="GET" and action=="approval":
@@ -90,17 +93,9 @@ def main():
     parser=argparse.ArgumentParser()
     parser.add_argument("--host",default="127.0.0.1")
     parser.add_argument("--port",type=int,default=int(os.getenv("PORT","8766")))
-    parser.add_argument("--data-dir",default=os.getenv("JUDGMENT_DATA_DIR",str(Path.home()/".trading-journal")))
     parser.add_argument("--allow-origin",action="append",default=[])
     args=parser.parse_args()
-    directory=Path(args.data_dir).expanduser().resolve()
-    # Persistent private storage must never be placed in the public repository.
-    if directory.is_relative_to(ROOT): parser.error("分析の保存先はリポジトリ外の永続フォルダを指定してください。")
-    directory.mkdir(parents=True,exist_ok=True)
     origins=args.allow_origin or ["https://piro-develop.github.io"]
-    runtime=ROOT/".runtime";runtime.mkdir(exist_ok=True)
-    (runtime/"production.json").write_text(json.dumps({"pid":os.getpid(),"port":args.port,
-       "data_directory":str(directory),"started_at":datetime.now(timezone.utc).isoformat()},ensure_ascii=False),encoding="utf-8")
-    uvicorn.run(create_app(directory,origins=origins),host=args.host,port=args.port,access_log=False)
+    uvicorn.run(create_app(origins=origins),host=args.host,port=args.port,access_log=False)
 
 if __name__=="__main__": main()

@@ -7,5 +7,6 @@
   "rollback_tag": "rollback-before-stock-judgment-20260911",
   "local_integrated_candidate": "89e6eed320ea85abf5b1a3a229258211402e8384",
   "backend_url": null,
-  "release_status": "waiting_for_host_account_and_paid_service_authorization"
+  "release_status": "pending_verification_windows_policy_and_browser_runtime_blocked",
+  "backend_plan": "render_free_stateless_firestore"
 }

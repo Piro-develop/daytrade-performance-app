@@ -26,14 +26,19 @@ def decode(value,maximum=10_000_000):
     return result
 
 class JudgmentService:
-    def __init__(self,directory):
-        self.directory=Path(directory).resolve()
+    def __init__(self,directory=None,store=None):
+        self.directory=Path(directory).resolve() if directory is not None else None
+        self.store=store
     def folder(self,uid):
         if not isinstance(uid,str) or not uid: raise InputError("本人情報がありません。")
+        if self.directory is None: raise InputError("本番の保存先はFirestoreです。")
         folder=self.directory/"users"/hashlib.sha256(uid.encode()).hexdigest()
         folder.mkdir(parents=True,exist_ok=True)
         return folder
     def history(self,uid):
+        if self.store is not None:
+            if self.store.uid!=uid: raise InputError("本人情報が一致しません。")
+            return self.store
         return History(self.folder(uid)/"history.sqlite")
     def catalog(self):
         return {"cards":all_cards(),"automatic_cards":sorted(AUTO_CARDS|{"ME-E","DE-C"}),
@@ -67,7 +72,10 @@ class JudgmentService:
     def list_runs(self,uid):
         history=self.history(uid)
         rows=[]
-        for row in history.list_runs(50):
+        for row in history.list_runs(20):
+            if "name" in row:
+                rows.append(row)
+                continue
             result=history.get(row["run_id"])
             rows.append({**row,"name":result["name"],"horizon":result["metadata"].get("horizon","swing"),
                          "is_demo":result["metadata"].get("is_demo",False)})
@@ -103,6 +111,8 @@ class JudgmentService:
             "attachment:"+image_id,stamp,published,datetime.now(timezone.utc).isoformat(),
             str(payload.get("summary","")),image_id,"image",.5)
         evidence.validate(asof)
+        if self.store is not None:
+            return self.history(uid).save_image(raw,evidence,kind)
         folder=self.folder(uid)/"attachments";folder.mkdir(exist_ok=True)
         path=folder/(image_id+(".png" if kind=="PNG" else ".jpg"))
         if not path.exists():

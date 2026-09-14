@@ -1,6 +1,5 @@
 FROM python:3.13-slim
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 OPENBLAS_NUM_THREADS=1
-ENV JUDGMENT_DATA_DIR=/var/data/trading-journal
 WORKDIR /app
 COPY deploy/requirements-backend.txt /app/deploy/requirements-backend.txt
 RUN pip install --no-cache-dir --only-binary=:all: --require-hashes -r /app/deploy/requirements-backend.txt

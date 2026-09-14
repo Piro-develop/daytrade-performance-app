@@ -1,89 +1,63 @@
-# 公開サイトへのリリース準備（2026-09-11）
+# Render Free / Firestore 公開手順（2026-09-14）
 
-## 記録した基準版
+## 公開状態
+公開URL: https://piro-develop.github.io/daytrade-performance-app/
+公開main: c0d69f0b7001a9dc9e5a71a537dbbe2b4b698b40
+復旧タグ: rollback-before-stock-judgment-20260911（変更しない）
+Pythonバックエンドは未作成。公開mainは未更新。
 
-- 公開URL：https://piro-develop.github.io/daytrade-performance-app/
-- 公開mainとPages成功ビルド：c0d69f0b7001a9dc9e5a71a537dbbe2b4b698b40
-- GitHubへpush済みのrollbackタグ：rollback-before-stock-judgment-20260911
-- 統合版候補：89e6eed320ea85abf5b1a3a229258211402e8384
-- 公開mainは未変更。画面だけ先に公開しない。
-- Publicリポジトリの利用は最新ユーザー指示で確認済み。旧Private方針による保留は解除。
+## 構成
+既存GitHub Pages + Render Free Web Service 1台（Singapore、Docker）。
+永続ディスク・有料プラン・管理用秘密鍵は不要。
+既存GoogleログインのFirebase ID TokenをGoogleで検証し、検証済みUIDだけを使用。
+Firestore RESTにも同じID Tokenを渡し、既存の本人限定ルールを適用する。
+既存の取引コレクション、Firebase設定、セキュリティルールは変更しない。
 
-## 選定した最小構成
+本人の users/{uid}/judgmentRuns/{analysis_id} に分析を保存。
+入力・結果・設定を圧縮し、450KB単位のchunks子コレクションへ保存する。
+3時間軸の保存は1回のFirestore commitで一括確定する。容量超過は保存前に拒否する。
+画像は users/{uid}/judgmentImages/{image_id} 配下へ保存し、上限6MB。
+承認履歴も分析の子コレクションへ保存する。
+トークンは保存せず、APIリクエスト中だけ使用する。
+通常起動ではSQLiteもローカルディスクも使用しない。旧SQLiteコードはオフライン検証用に残す。
+旧ローカル履歴の自動移行は行わない。元データは削除しない。
 
-既存GitHub Pages + RenderのWeb Service 1台 + 永続ディスク1GB。
-既存Googleログイン、Firestore、公開URLは維持。
-Pythonの判定APIだけをHTTPS公開し、本人別SQLiteと画像は /var/data に保存する。
+## 無料版の制約
+15分アクセスがないとスリープし、次回アクセス時に起動待ちが発生する。
+画面は12秒後に待機案内を表示し、180秒で通信を打ち切る。POSTを自動再送しない。
+通信失敗時は保存が完了している可能性があるため、履歴確認後に再操作する。
+履歴一覧は最新20件。各時間軸を1件として数える。
+Firestoreの読み書き・保存容量の無料枠を消費する。既存の請求設定は変更しない。
+公式資料:
+- https://render.com/docs/free
+- https://firebase.google.com/docs/firestore/use-rest-api
+- https://firebase.google.com/docs/firestore/quotas
 
-Renderの無料枠は永続ディスクを使えず、現在の保存方法では再配置等で履歴が消える。
-このため0.5c-512mbプランと1GBディスクを選定した。
-基本料金の目安はサーバー月7米ドル＋保存領域月0.25米ドル＝月7.25米ドル。
-税・為替・無料枠超過分は別。無料のHobbyワークスペースを使用し、Pro契約や自動増強は追加しない。
-[公式料金](https://render.com/pricing)、[無料枠の制限](https://render.com/docs/free)、[永続ディスク](https://render.com/docs/disks) を確認した。
+## リリース順序
+1. ローカルの保存・主要計算の検証を完了する。秘密情報・個人データを点検する。
+2. 正規リポジトリの公開候補ブランチへpushする。Pagesのmainはまだ更新しない。
+3. RenderでNew Web Serviceを作り、このリポジトリと候補ブランチを指定する。
+4. Docker / Singapore / Free / Health Check: /healthz / Auto Deploy: Off。
+   ディスクを追加しない。カード登録・有料契約が求められたら止める。
+5. 発行された実URLで scripts/check-production-backend.py を実行する。
+6. 既存Googleログインで3時間軸分析、Firestore保存、履歴再表示を実際に確認する。
+7. judgment-config.jsonのapiBaseを確認済みHTTPS URL + /api/judgmentへ変更する。
+8. mainへpushし、Pagesビルドと公開サイトの既存タブ・銘柄判断を確認する。
 
-ローカル通常サーバーの常駐メモリーは約145MB。
-本番APIに必要な17パッケージだけを対象にし、Streamlit等のUI用依存を除いた。
-Python 3.13/Linux x86_64用の導入ファイルを全件取得できることを確認。
-版とハッシュを deploy/requirements-backend.txt に固定した。
-このPCにはDocker実行環境がないため、Linuxコンテナー内の実起動はRender作成後に確認する。
-不足時に勝手に上位の有料プランへ変更しない。
+## 現在の検証制限
+2026-09-14: Windowsのアプリケーション制御がpandasのDLLを拒否し、
+主要統合テストは収集時に停止した。合格とは扱わない。
+ブラウザー操作ツールも実行環境の起動エラーでRenderへ接続できない。
+新構成のRender実起動・実アカウントでのFirestore保存は未検証。
+環境を復旧して上記確認を終えるまで公開しない。
 
-## 準備ファイル
-
-- render.yaml：シンガポール、1台、512MB、1GBディスク、自動再配置OFF、/healthz
-- Dockerfile / .dockerignore：本番APIに必要なファイルだけを取り込む
-- deploy/requirements-backend.txt：固定ライブラリとハッシュ
-- deploy/production-baseline.json：公開版、候補版、復旧タグ
-- scripts/check-production-backend.py：HTTPS・稼働・未認証拒否・Pages通信許可の確認
-- scripts/rollback-production.ps1：Gitで旧版へ戻すためのスクリプト
-
-Dockerの公開先はAPIとして使用し、別のユーザー向け画面は追加しない。
-新しい秘密鍵・認証トークンはファイルへ書かない。
-既存Firebaseの公開Web設定は既存app.jsから読む。Firestoreの設定・ルール・データは変更しない。
-
-## 停止しているユーザー操作
-
-Renderへのログイン（未登録なら新規アカウント作成）、
-この有料構成の承認、および必要な支払い設定。
-ユーザーの指示どおり、契約・決済操作の前で停止する。
-準備ファイルの作成は有料サービス作成の承認を意味しない。
-公開バックエンドの実URLはまだ発行されていない。
-
-## 操作後のリリース順序
-
-1. 秘密情報・個人データを含めないことを確認し、正規リポジトリの検証用ブランチへ候補をpushする。Pagesのmainは変更しない。
-2. RenderのGitHub連携をこのリポジトリに限定し、検証用ブランチを指定する。
-3. render.yamlの1サービス・1ディスクを確認して作成。料金はユーザー自身が確認する。
-4. Render発行の実際のHTTPS URLを確認し、推測したURLは使用しない。
-5. HTTPS、稼働、未認証拒否、Pagesからの通信許可、既存Googleログイン、
-   3時間軸分析、履歴再表示、再起動後も保存データが残ることを確認する。
-6. judgment-config.json の apiBase を、確認したHTTPS URL + /api/judgment に設定する。
-7. 公開mainが基準SHAから変わっていないことを確認して、統合版をmainへpushする。
-8. Pagesのビルド完了後、公開URLで既存タブと［銘柄判断］の実分析を確認する。
-
-ログインが必要な場合はユーザー自身が操作する。トークンをチャットに貼らせない。
-APIキー・認証トークン・個人データ・分析DB・画像・.runtime は追加pushしない。
-手順5が完了するまで本番mainを更新しない。
-
-## 即時rollback
-
-まず予行表示：
-
+## rollback
+予行表示:
 ~~~powershell
 .\scripts\rollback-production.ps1
 ~~~
-
-本番反映後に旧版へ戻す：
-
+本番反映後の復旧:
 ~~~powershell
 .\scripts\rollback-production.ps1 -Execute
 ~~~
-
-作業ツリーが空で、ローカルmainと公開mainが一致する場合だけ実行する。
-記録したタグを検証し、旧版のファイルへ戻す新commitを作って通常pushする。
-force-push、reset --hard、git clean、DB削除は行わない。
-Pagesビルド完了後に旧画面を確認する。Firebaseと分析DBは維持する。
-APIは自動再配置OFFなので、mainのrollbackで分析サーバーを自動更新しない。
-
-復旧スクリプト自身は旧版にないため、復旧後にリポジトリからなくなる。
-基準SHAとタグはGitHubに残る。実行前の予行表示は確認済み。
+旧版へ戻す新commitを通常pushする。Firebaseデータは削除しない。

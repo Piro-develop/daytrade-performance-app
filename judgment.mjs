@@ -14,6 +14,7 @@ const button = (id,label,primary=false) => '<button id="j-'+id+'" type="button" 
 const metric = (label,value) => '<div class="j-metric"><span>'+esc(label)+'</span><strong>'+esc(value)+'</strong></div>';
 const list = values => '<ul>'+((values||[]).map(v=>'<li>'+esc(text(v))+'</li>').join("")||"<li>情報なし</li>")+'</ul>';
 const bytes64 = file => new Promise((resolve,reject)=>{
+  if(file.type.startsWith("image/") && file.size>6000000) return reject(new Error("画像は6MB以内です。"));
   if(file.size>10000000) return reject(new Error("ファイルは10MB以内です。"));
   const r=new FileReader();r.onload=()=>resolve(String(r.result).split(",")[1]);r.onerror=reject;r.readAsDataURL(file);
 });
@@ -50,13 +51,20 @@ export function createJudgment(root,getUser,getSecurities) {
       apiBase=url.href.replace(/\/$/,"");
     }
     const token=await user.getIdToken();
+    const slow=setTimeout(()=>{if(epoch===generation) message("無料サーバーを起動しています。初回はしばらくお待ちください…");},12000);
+    const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),180000);
+    try {
     const response=await fetch(apiBase+"/"+action,{method:payload===undefined?"GET":"POST",
       headers:{Authorization:"Bearer "+token,...(payload===undefined?{}:{"Content-Type":"application/json"})},
-      body:payload===undefined?undefined:JSON.stringify(payload),cache:"no-store",credentials:"omit",redirect:"error"});
+      body:payload===undefined?undefined:JSON.stringify(payload),cache:"no-store",credentials:"omit",redirect:"error",signal:controller.signal});
     if(epoch!==generation||getUser()?.uid!==user.uid) throw new Error("ログイン情報が変わりました。");
     let data;try {data=await response.json();} catch {throw new Error("判定サーバーに接続できません。公開先の設定を確認してください。");}
     if(!response.ok) throw new Error(data.error||"判定サーバーでエラーが発生しました。");
     return data;
+    } catch(e) {
+      if(e.name==="AbortError" || e instanceof TypeError) throw new Error("接続が完了しませんでした。保存済みの場合もあるため、履歴を確認してから再操作してください。");
+      throw e;
+    } finally {clearTimeout(slow);clearTimeout(timeout);}
   }
   async function work(task,success="") {
     if(busy) return;busy=true;
@@ -108,8 +116,19 @@ export function createJudgment(root,getUser,getSecurities) {
     set("macro-ref",(macro.evidence_ids||[]).join(","));set("exit",(m.exit_conditions||[]).join("\n"));
     evidenceList();cardGuide();changed();
   }
+  const imageButton = e => /^firestore:users\/[^/]+\/judgmentImages\/[a-f0-9]{32}$/.test(e.source_uri||"")
+    ? '<button type="button" class="secondary-button" data-image="'+esc(e.source_uri.split("/").pop())+'">保存画像を表示</button>' : "";
+  root.addEventListener("click",event=>{
+    const b=event.target.closest("[data-image]");if(!b||!root.contains(b))return;
+    work(async()=>{
+      const value=await api("images/"+b.dataset.image);
+      if(!["image/png","image/jpeg"].includes(value.mime))throw new Error("画像形式が不正です。");
+      const img=document.createElement("img");img.alt="保存した判断根拠";img.style.maxWidth="100%";
+      img.src="data:"+value.mime+";base64,"+value.data;b.replaceWith(img);
+    });
+  });
   function evidenceList() {
-    $("evidence-list").innerHTML=(metadata.evidence||[]).map(e=>'<div class="j-evidence"><strong>'+esc(e.evidence_id)+'</strong><p>'+esc(e.summary)+'</p><small>'+esc(e.source_name)+" · "+esc(e.observed_at)+'</small></div>').join("")||'<p class="j-muted">根拠はまだ登録されていません。</p>';
+    $("evidence-list").innerHTML=(metadata.evidence||[]).map(e=>'<div class="j-evidence"><strong>'+esc(e.evidence_id)+'</strong><p>'+esc(e.summary)+'</p><small>'+esc(e.source_name)+" · "+esc(e.observed_at)+'</small>'+imageButton(e)+'</div>').join("")||'<p class="j-muted">根拠はまだ登録されていません。</p>';
     $("card-count").textContent=(metadata.assessments||[]).length+"件の手動採点";
   }
   function cardGuide() {
@@ -165,7 +184,7 @@ export function createJudgment(root,getUser,getSecurities) {
         ["主要ドライバー",(macro.drivers||[]).map(x=>x.name||x).join("、")],
         ["企業の感応度",macro.company_sensitivity],["セクター要因と個別材料の強弱",macro.dominant_force]
       ].map(([k,v])=>'<li><b>'+esc(k)+'</b><p>'+esc(v||"不足")+'</p></li>').join("")+'</ol><p>個別材料：'+esc(macro.specific_factors||"不足")+'</p><p>根拠が揃っているか：'+(macro.valid?"確認済み":"不足")+'</p>'),
-      detail("Evidence・データ信頼度・決算",'<p>'+esc(r.confidence?.note)+'</p><p>決算予定：'+esc(r.earnings?.scheduled_at||"未確認")+'</p>'+Object.values(r.evidence||{}).map(e=>'<div class="j-evidence"><b>'+esc(e.evidence_id)+'</b><p>'+esc(e.summary)+'</p><small>'+esc(e.source_name)+" / "+esc(e.source_uri)+" / "+esc(e.observed_at)+'</small></div>').join("")),
+      detail("Evidence・データ信頼度・決算",'<p>'+esc(r.confidence?.note)+'</p><p>決算予定：'+esc(r.earnings?.scheduled_at||"未確認")+'</p>'+Object.values(r.evidence||{}).map(e=>'<div class="j-evidence"><b>'+esc(e.evidence_id)+'</b><p>'+esc(e.summary)+'</p><small>'+esc(e.source_name)+" / "+esc(e.source_uri)+" / "+esc(e.observed_at)+'</small>'+imageButton(e)+'</div>').join("")),
       '<p class="j-muted">分析ID：'+esc(r.run_id)+'<br>設定：'+esc(r.config_version)+'<br>判断支援用の記録です。自動売買は行いません。</p>'
     ].join("");
     set("horizon",horizon);set("scenario",scenario);
@@ -217,7 +236,7 @@ export function createJudgment(root,getUser,getSecurities) {
         '<div class="j-grid">'+input("ev-id","Evidence ID","text",'placeholder="例：financial-2026q2"')+input("ev-source","資料名")+input("ev-uri","出典URL・資料の所在")+input("ev-observed","対象日時（時差付き）")+input("ev-published","公表日時（時差付き）")+input("ev-until","有効期限（時差付き）")+
         '<label>出典の確認<select id="j-ev-quality">'+opt("unknown","未確認")+opt("original_verified","原資料を確認")+opt("secondary_verified","二次資料を確認")+opt("image_verified","画像を目視確認")+'</select></label>'+
         area("ev-summary","確認した事実・要約")+'</div>'+button("add-evidence","根拠を登録・更新")+
-        '<div class="j-grid">'+input("image","スクリーンショット（PNG/JPEG）","file",'accept="image/png,image/jpeg"')+check("image-confirm","画像の銘柄・日時・内容を目視確認した")+'</div>'+button("add-image","画像を根拠として保存")+'<div id="j-evidence-list"></div>'),
+        '<div class="j-grid">'+input("image","スクリーンショット（PNG/JPEG・6MB以内）","file",'accept="image/png,image/jpeg"')+check("image-confirm","画像の銘柄・日時・内容を目視確認した")+'</div>'+button("add-image","画像を根拠として保存")+'<div id="j-evidence-list"></div>'),
       detail("3. 独立した事前確認（Preflight）",'<p class="j-muted">点数とは独立して確認します。チェックだけでなく、根拠IDを紐付けてください。</p>'+[
         ["negative_news","重大な悪材料を確認した"],["thesis","投資前提の崩れを確認した"],["liquidity","流動性・執行可能性を確認した"]
       ].map(([k,l])=>'<div class="j-grid">'+check("pf-"+k,l)+input("pf-ref-"+k,"根拠ID（カンマ区切り）")+'</div>').join("")+
@@ -234,7 +253,7 @@ export function createJudgment(root,getUser,getSecurities) {
         area("metadata-json","詳細JSON（読み込んだ後に下のボタンで反映）")+button("apply-json","詳細JSONを入力へ反映")),
       detail("定性評価を外部AIとやり取り",'<p class="j-muted">選択した根拠だけをファイルに出力します。送信は手動です。株価・目標・損切や構造化採点はAIに生成させません。</p>'+input("ai-refs","外部に渡してよい根拠ID（カンマ区切り）")+button("ai-export","定性評価の依頼JSONを保存")+input("ai-file","AIの応答JSON","file",'accept=".json"')+button("ai-import","応答を検証して採点へ反映")),
       '<div class="j-actions">'+button("analyze","3つの時間軸で分析して保存",true)+button("retry","接続を再確認")+'</div><p class="j-muted">分析はログインした本人の履歴へ保存します。情報不足は未評価として表示します。</p></div>',
-      detail("分析履歴",button("refresh","履歴を更新")+'<div id="j-history"></div>')
+      detail("Firestoreの分析履歴（最新20件）",button("refresh","履歴を更新")+'<div id="j-history"></div>')
     ].join("");
     const now=new Date(),past=new Date(now);past.setFullYear(past.getFullYear()-4);
     set("asof",now.toISOString());set("start",past.toISOString().slice(0,10));set("end",now.toISOString().slice(0,10));

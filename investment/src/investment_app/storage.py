@@ -8,6 +8,20 @@ import uuid
 from contextlib import contextmanager
 from .models import AnalysisResult, Bundle, InputError, canonical, plain, time_value
 
+def validate_approval(result, scenario, action, target_hash, current_hash, now):
+    if action not in {"approved", "rejected"}:
+        raise InputError("承認または拒否の明示操作が必要です。")
+    decision = result["decisions"].get(scenario, {})
+    if not decision.get("approval_required") or not decision.get("approval_eligible"):
+        raise InputError("根拠・価格プラン・評価が成立したSevere条件判断だけを承認できます。")
+    if target_hash != result["approval_hash"] or current_hash != target_hash:
+        raise InputError("承認対象が変わりました。再分析して確認してください。")
+    plan = next((p for p in result["plans"] if p["kind"] == scenario.split(":")[0]), None)
+    if plan is None or time_value(now) > time_value(plan["expires_at"]):
+        raise InputError("価格プランの有効期限が切れています。")
+    if any(x["severity"] == "Critical" for x in decision["findings"]):
+        raise InputError("Criticalを承認で解除できません。")
+
 class History:
     def __init__(self, path: str | Path):
         self.path = Path(path)
@@ -68,19 +82,7 @@ class History:
 
     def approval(self, run_id: str, scenario: str, action: str, target_hash: str,
                  current_hash: str, now: str, user_id: str = "local_user") -> str:
-        if action not in {"approved", "rejected"}:
-            raise InputError("承認または拒否の明示操作が必要です。")
-        result = self.get(run_id)
-        decision = result["decisions"].get(scenario, {})
-        if not decision.get("approval_required") or not decision.get("approval_eligible"):
-            raise InputError("根拠・価格プラン・評価が成立したSevere条件判断だけを承認できます。")
-        if target_hash != result["approval_hash"] or current_hash != target_hash:
-            raise InputError("承認対象が変わりました。再分析して確認してください。")
-        plan = next((p for p in result["plans"] if p["kind"] == scenario.split(":")[0]), None)
-        if plan is None or time_value(now) > time_value(plan["expires_at"]):
-            raise InputError("価格プランの有効期限が切れています。")
-        if any(x["severity"] == "Critical" for x in decision["findings"]):
-            raise InputError("Criticalを承認で解除できません。")
+        validate_approval(self.get(run_id), scenario, action, target_hash, current_hash, now)
         with self.connect() as db:
             db.execute("INSERT INTO approvals VALUES (?,?,?,?,?,?,?,?)",
                 (str(uuid.uuid4()), run_id, scenario, action, target_hash, user_id, now,

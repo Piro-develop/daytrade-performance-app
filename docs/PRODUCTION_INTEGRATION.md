@@ -6,7 +6,7 @@
 iframe、Streamlit画面、UATアクセスコードを本番経路から除外した。
 app.jsへの変更は画面名、初期化、タブ表示、認証変更時の消去だけ。
 銘柄辞書 stocks.json と既存のGoogleログインを共有する。
-サマリ・売買記録・成績分析・設定・Firebase設定・Firestoreデータ構造は変更しない。
+サマリ・売買記録・成績分析・設定・Firebase設定・既存取引のデータ構造は変更しない。
 
 判定は app_server.py の /api/judgment/ から investment/src/investment_app の既存処理を呼ぶ。
 同梱コードだけで動作し、009プロジェクトのソースを実行時に参照しない。
@@ -40,18 +40,12 @@ py -3.13 -m venv .venv
 
 ## 保存
 
-通常アプリの分析は、既定でユーザーホームの .trading-journal/users/<uidのSHA256>/history.sqlite。
-PNG/JPEGは同じ利用者フォルダの attachments/ に保存する。
-保存先は既存のUATや元プロジェクトのDBと分離し、自動移行しない。
-
-~~~powershell
-.\start-app.ps1 -DataDirectory "D:\TradingJournalData"
-~~~
-
-クラウドでは JUDGMENT_DATA_DIR または --data-dir で永続ディスクを指定する。
-本番起動時は、リポジトリ内を保存先に指定すると拒否する。
-永続ディスクのない環境では再起動や再配置で消失するので、公開前に保存先を確定する。
-初期構成は1サーバー・SQLite。複数サーバーから同一DBを同時更新する構成は今回の対象外。
+通常アプリはFirestoreへ本人別に分析・画像・承認履歴を保存する。
+Python APIは既存Firebase ID Tokenを検証し、検証済みUIDだけを利用する。
+本番の正本としてSQLiteやローカルディスクを使用しない。
+保存先は users/{uid}/judgmentRuns と judgmentImages。既存取引は変更しない。
+旧ローカル履歴の自動移行・削除は行わない。
+詳細な公開手順・制限は PRODUCTION_RELEASE.md を参照する。
 
 既存の一意な run_id を分析IDとして利用する。
 3時間軸を1トランザクションで追記し、途中失敗時に一部だけ保存しない。
