@@ -107,6 +107,10 @@ def test_google_validation_required_for_plausible_jwt(monkeypatch):
 def test_canonical_spec_config_and_engines_unchanged():
     manifest=json.loads((ROOT/"docs/INTEGRATION_SOURCE_HASHES.json").read_text(encoding="utf-8"))
     for relative,expected in manifest["files"].items():
-        # Storage adapters changed; the specification and calculation engines are unchanged.
+        # Storage adapters and price-level tick integration have explicit regression tests.
         if Path(relative.replace(chr(92),"/")).name in {"storage.py","uat_service.py","entry_exit.py"}: continue
-        assert hashlib.sha256((ROOT/relative.replace("\\","/")).read_bytes()).hexdigest()==expected,relative
+        raw=(ROOT/relative.replace(chr(92),"/")).read_bytes()
+        # Git checkout may translate CRLF/LF; only line endings may differ from the original.
+        lf=raw.replace(b"\r\n",b"\n")
+        variants=(raw,lf,lf.replace(b"\n",b"\r\n"))
+        assert expected in {hashlib.sha256(value).hexdigest() for value in variants},relative
