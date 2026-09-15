@@ -2,7 +2,7 @@
 from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 PUBLIC_FILES = {
-    "index.html","app.js","styles.css","credit-styles.css",
+    "index.html","ios-auth-fix.mjs","app.js","styles.css","credit-styles.css",
     "judgment.mjs","judgment.css","judgment-config.json",
     "stocks.json","stock-readings.json","stock-search-aliases.json","manifest.webmanifest",
     "credit-calculation.mjs","position-allocation.mjs","spot-calculation.mjs",

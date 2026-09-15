@@ -13,3 +13,4 @@
 !investment/src/investment_app/*.py
 !investment/config/
 !investment/config/*.json
+!stocks.json

@@ -67,3 +67,8 @@
  .j-result .j-concern{padding:9px;font-size:11px;line-height:1.5;margin:9px 0}
  .j-result #j-recommendation{font-size:11px;line-height:1.5;margin:9px 0}
 }
+
+.judgment [hidden]{display:none!important}
+.judgment #j-analyze{width:100%;min-height:48px}
+
+.j-result{scroll-margin-top:16px}

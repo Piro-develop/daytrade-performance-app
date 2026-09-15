@@ -1,0 +1,37 @@
+name: Judgment release check
+on:
+  push:
+    branches: [release/render-free-firestore]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install backend and test dependencies
+        run: |
+          python -m pip install --only-binary=:all: --require-hashes -r deploy/requirements-backend.txt
+          python -m pip install 'pytest>=8,<10'
+      - name: Check important calculation and storage regressions
+        env:
+          PYTHONPATH: .:investment/src
+        run: |
+          python -m pytest investment/tests/test_automatic_judgment.py investment/tests/test_firestore_judgment.py investment/tests/test_production_judgment.py investment/tests/test_approval.py investment/tests/test_decision.py -q
+          node --check judgment.mjs
+      - name: Build production container
+        run: docker build -t judgment-api .
+      - name: Check production startup and authentication boundary
+        run: |
+          docker run -d --name judgment-api -e PORT=10000 -p 8766:10000 judgment-api
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8766/healthz > /tmp/judgment-health.json; then break; fi
+            sleep 2
+          done
+          python -c 'import json; d=json.load(open("/tmp/judgment-health.json")); assert d["ready"] and "automatic-judgment-v1" in d["features"]'
+          test "$(curl --silent -o /dev/null -w '%{http_code}' http://127.0.0.1:8766/api/judgment/history)" = "401"

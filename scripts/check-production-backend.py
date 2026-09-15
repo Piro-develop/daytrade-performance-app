@@ -14,7 +14,7 @@ def main():
     with requests.Session() as session:
         health=session.get(base+"/healthz",timeout=30,allow_redirects=False)
         health.raise_for_status()
-        if health.json()!={"service":"trading-journal","ready":True}: raise RuntimeError("Unexpected service")
+        if health.json().get("service")!="trading-journal" or health.json().get("ready") is not True: raise RuntimeError("Unexpected service")
         protected=session.get(base+"/api/judgment/history",timeout=30,allow_redirects=False)
         if protected.status_code!=401: raise RuntimeError("Unauthenticated access was not rejected")
         origin="https://piro-develop.github.io"

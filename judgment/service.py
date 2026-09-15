@@ -69,6 +69,51 @@ class JudgmentService:
         bundle=bundle_from_input(csv,meta,symbol,meta["as_of"])
         history=self.history(uid)
         return run_all(bundle,history,policy,str(payload.get("entry") or "").strip() or None)
+    def automatic(self,uid,payload):
+        from .automatic import acquire
+        query=str(payload.get("symbol","")).strip()
+        if not query: raise InputError("日本株の銘柄名または銘柄コードを入力してください。")
+        entry=str(payload.get("entry") or "").strip()
+        if entry:
+            import math
+            try:
+                if not math.isfinite(float(entry)) or float(entry)<=0: raise ValueError()
+            except ValueError as exc: raise InputError("想定Entry価格は正の数値で入力してください。") from exc
+        policy=payload.get("policy","unspecified")
+        if policy not in {"unspecified","allow","avoid"}: raise InputError("決算方針を確認してください。")
+        acquired=acquire(query);meta=acquired["metadata"];raw=acquired["csv"]
+        supplement=payload.get("supplement") or {}
+        if not isinstance(supplement,dict):raise InputError("補完データの形式を確認してください。")
+        if raw is None and supplement.get("csv"):
+            raw,_=normalize_csv(decode(supplement["csv"]),acquired["symbol"],"",False,None)
+            meta["price_source"]="利用者の補完CSV"
+        notes=str(supplement.get("notes","")).strip()
+        if len(notes)>20000:raise InputError("補足は2万文字以内で入力してください。")
+        if notes:
+            stamp=meta["as_of"];eid="user-note-"+digest(notes)[:16]
+            meta["evidence"].append(plain(Evidence(eid,"利用者の補足","user:note",stamp,stamp,stamp,notes,digest(notes),"manual",.5)))
+        if supplement.get("image"):
+            image=self.image(uid,{"image":supplement["image"],"confirmed":supplement.get("image_confirmed"),
+                "source_name":"利用者の補完画像","as_of":meta["as_of"],"observed_at":supplement.get("image_observed",""),
+                "published_at":meta["as_of"],"summary":notes or "利用者が目視確認した画像。数値の自動抽出・採点には未使用。"})
+            meta["evidence"].append(image)
+        missing=["最新の公式決算・会社計画と将来業績の根拠","カタリスト・市場期待と織り込みの確認",
+                 "最新の信用需給・同業比較","次回決算日と重要イベント",
+                 "重大悪材料・投資前提・流動性の独立確認","企業感応度を含むマクロ評価","根拠に基づく定性コンテキスト評価"]
+        if not meta.get("tick_size"):missing.append("最新の呼値区分")
+        if not meta.get("intraday_bars"):missing.append("当日の確定5分足（デイトレ）")
+        meta["automatic"].update(missing=missing,current_quote=meta.get("current_quote"),sector=meta.get("macro",{}).get("sector"),
+                                  entry_source="user" if entry else "public_quote",source_mode="automatic_public")
+        if not raw:
+            return {"results":{},"recommended":[],"status":"評価保留","symbol":acquired["symbol"],"name":acquired["name"],
+                    "missing":["確定日足の株価・出来高"]+missing,"notices":acquired["notices"],"saved":False}
+        bundle=bundle_from_input(raw,meta,acquired["symbol"],meta["as_of"])
+        # Keep qualitative assessment behind the existing AssessmentProvider contract.
+        # Missing data never becomes an anchor, a neutral score or a completed Preflight review.
+        price=entry or meta.get("current_quote",{}).get("price")
+        results=run_all(bundle,self.history(uid),policy,str(price) if price else None)
+        return {"results":results,"missing":missing,"notices":acquired["notices"],"saved":True}
+
     def list_runs(self,uid):
         history=self.history(uid)
         rows=[]

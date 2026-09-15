@@ -33,8 +33,15 @@ def plans_for(bundle: Bundle, technical: dict, cfg: dict, specified_entry=None) 
     if not technical["tick_valid"]:
         return []
     tick = D(bundle.metadata["tick_size"])
+    schedule=bundle.metadata.get("tick_schedule",[])
+    def step(value):
+        return next((D(row["tick"]) for row in schedule if row["up_to"] is None or D(value)<=D(row["up_to"])),tick)
+    def round_price(value,up=False):
+        # Recheck a band boundary crossed by upward rounding.
+        result=rounded(value,step(value),up)
+        return rounded(result,step(result),up)
     market = D(technical["latest"])
-    current = rounded(specified_entry if specified_entry is not None else market,tick,True)
+    current = round_price(specified_entry if specified_entry is not None else market,True)
     strong = [b for b in technical["bands"] if b.strength >= cfg["strong_band"]]
     supports = sorted([b for b in strong if D(b.high) < current], key=lambda b:b.high,reverse=True)
     resistances = sorted([b for b in strong if D(b.low) > current],key=lambda b:b.low)
@@ -42,12 +49,12 @@ def plans_for(bundle: Bundle, technical: dict, cfg: dict, specified_entry=None) 
         return []
     support,resistance = supports[0],resistances[0]
     # STOP FIRST. No target distance or desired RR participates in this calculation.
-    buffer = max(tick*D(cfg["stop_buffer_ticks"]), D(technical["atr"] or 0)*D(cfg["stop_buffer_atr"]))
-    stop = rounded(D(support.low)-buffer,tick)
-    target = rounded(D(resistance.low)-tick,tick)
-    target2 = rounded(D(resistances[1].low)-tick,tick) if len(resistances)>1 else None
-    stop2 = rounded(D(supports[1].low)-buffer,tick) if len(supports)>1 else None
-    alert = rounded(support.high,tick)
+    buffer = max(step(support.low)*D(cfg["stop_buffer_ticks"]), D(technical["atr"] or 0)*D(cfg["stop_buffer_atr"]))
+    stop = round_price(D(support.low)-buffer)
+    target = round_price(D(resistance.low)-step(D(resistance.low)-D("0.000001")))
+    target2 = round_price(D(resistances[1].low)-step(D(resistances[1].low)-D("0.000001"))) if len(resistances)>1 else None
+    stop2 = round_price(D(supports[1].low)-buffer) if len(supports)>1 else None
+    alert = round_price(support.high)
     expires = time_value(bundle.as_of)+timedelta(hours=cfg["plan_valid_hours"])
     local_day = time_value(bundle.as_of).astimezone(JST).date().isoformat()
     next_sessions = sorted(day for day in bundle.metadata.get("calendar", []) if day > local_day)
@@ -71,7 +78,7 @@ def plans_for(bundle: Bundle, technical: dict, cfg: dict, specified_entry=None) 
         trigger_confirmed=bool(kind=="現値" and (bounce or breaking or retest)))
     plans = [first] if first else []
     # Same structural scenario keeps both exits unchanged; improve entry instead.
-    pullback = rounded(support.high,tick,True)
+    pullback = round_price(support.high,True)
     if pullback < current and rr(pullback,target,stop) is not None:
         second = make_plan(pullback,target,stop,kind="押し目候補",support_id=support.band_id,
             resistance_id=resistance.band_id,evidence_ids=refs,expires_at=expires.isoformat(),

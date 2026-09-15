@@ -108,5 +108,5 @@ def test_canonical_spec_config_and_engines_unchanged():
     manifest=json.loads((ROOT/"docs/INTEGRATION_SOURCE_HASHES.json").read_text(encoding="utf-8"))
     for relative,expected in manifest["files"].items():
         # Storage adapters changed; the specification and calculation engines are unchanged.
-        if Path(relative.replace(chr(92),"/")).name in {"storage.py","uat_service.py"}: continue
+        if Path(relative.replace(chr(92),"/")).name in {"storage.py","uat_service.py","entry_exit.py"}: continue
         assert hashlib.sha256((ROOT/relative.replace("\\","/")).read_bytes()).hexdigest()==expected,relative

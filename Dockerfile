@@ -4,7 +4,7 @@ WORKDIR /app
 COPY deploy/requirements-backend.txt /app/deploy/requirements-backend.txt
 RUN pip install --no-cache-dir --only-binary=:all: --require-hashes -r /app/deploy/requirements-backend.txt
 # app.js supplies only the existing public Firebase web configuration.
-COPY app_server.py web_assets.py app.js /app/
+COPY app_server.py web_assets.py app.js stocks.json /app/
 COPY judgment/ /app/judgment/
 COPY investment/src/investment_app/ /app/investment/src/investment_app/
 COPY investment/config/ /app/investment/config/

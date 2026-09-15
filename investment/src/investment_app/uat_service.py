@@ -33,6 +33,12 @@ def run_all(bundle,history,policy="unspecified",entry=None):
     for h in ("midlong","daytrade"):
         result,b,c=analyze_horizon(bundle,cfg,h,policy,entry)
         pending.append((result,b,c));results[h]=plain(result)
+    if bundle.metadata.get("automatic"):
+        for result,source,c in pending:
+            result.metadata["automatic"]=copy.deepcopy(bundle.metadata["automatic"])
+            result.metadata["source_mode"]="automatic_public"
+            result.approval_hash=digest({k:v for k,v in plain(result).items() if k!="approval_hash"})
+            results[result.metadata["horizon"]]=plain(result)
     # Persist the three independent snapshots in one transaction, avoiding partial groups.
     save_group(history,pending)
     return results

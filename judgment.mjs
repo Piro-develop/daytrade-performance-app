@@ -2,6 +2,7 @@
 const esc = (v="") => String(v ?? "").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const obj = v => v && typeof v === "object" ? v : {};
 const text = v => v == null ? "未評価" : typeof v === "object" ? JSON.stringify(v) : String(v);
+const scoreText = v => v == null ? "未評価" : Number(v).toFixed(1)+" / 10";
 const num = v => v == null ? "未評価" : Number(v).toLocaleString("ja-JP",{maximumFractionDigits:2});
 const refs = v => String(v||"").split(/[,、\n]/).map(x=>x.trim()).filter(Boolean);
 const names = {swing:"スイング",daytrade:"デイトレ",midlong:"中長期"};
@@ -51,7 +52,7 @@ export function createJudgment(root,getUser,getSecurities) {
       apiBase=url.href.replace(/\/$/,"");
     }
     const token=await user.getIdToken();
-    const slow=setTimeout(()=>{if(epoch===generation) message("無料サーバーを起動しています。初回はしばらくお待ちください…");},12000);
+    const slow=setTimeout(()=>{if(epoch===generation) message("取得・分析を続けています。初回はサーバーの起動にも時間がかかります…");},12000);
     const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),180000);
     try {
     const response=await fetch(apiBase+"/"+action,{method:payload===undefined?"GET":"POST",
@@ -148,24 +149,27 @@ export function createJudgment(root,getUser,getSecurities) {
     const findings=[...(d.findings||r.findings||[])].sort((a,b)=>({Critical:0,Severe:1,Warning:2}[a.severity]??3)-({Critical:0,Severe:1,Warning:2}[b.severity]??3));
     const expired=p.expires_at && new Date(p.expires_at)<new Date();
     const preferred=inputVersion===resultVersion?recommended.filter(h=>Object.values(results[h]?.presentation||{}).some(v=>v.can_recommend&&!v.expired)):[];
-    const recommendationText=preferred.length?preferred.map(h=>names[h]).join(" / "):"買いを推奨できる時間軸なし";
+    const recommendationText=preferred.length?preferred.map(h=>names[h]).join(" / "):Object.values(results).every(x=>Object.values(x.decisions||{}).every(d=>d.label==="見送り"))?"見送り":"未判定（必要情報が不足）";
     const view=r.presentation?.[scenario]||{};
     let label=view.label||d.label||d.status||"未評価";
-    if(findings.some(f=>f.severity==="Critical"))label="評価不能";
+    if(findings.some(f=>f.severity==="Critical"))label="評価保留";
     if(inputVersion!==resultVersion)label+="（保存済みの分析）";
     else if(expired&&!label.includes("期限切れ"))label+="（期限切れ・履歴）";
     const note=r.metadata.is_demo?"検証用の架空データ":expired?"価格プランの有効期限切れ":d.approval_required?"重大警告の確認が必要":d.status;
     const macro=obj(r.technical.macro);
+    $("result").hidden=false;
     $("result").innerHTML=[
-      '<div class="j-result-head"><div><p class="section-kicker">判断サマリ</p><h2>'+esc(r.symbol+" "+r.name)+'</h2></div>'+button("export-result","JSON保存")+'</div>',
+      '<div class="j-result-head"><div><p class="section-kicker">判断サマリ</p><h2>'+esc(r.symbol+" "+r.name)+'</h2></div>'+'<span hidden>'+button("export-result","JSON保存")+'</span>'+'</div>',
       '<p id="j-recommendation" class="j-muted">推奨時間軸：'+esc(recommendationText)+'<br>表示中：'+esc(names[horizon]+" / "+kind)+'</p>',
       '<div class="j-verdict"><strong id="j-verdict-label">'+esc(label)+'</strong><span>'+esc(note)+'</span></div>',
       '<div class="j-metrics">'+[
-        ["投資妙味",num(s.investment)+" / 10"],["Entry品質",num(s.entry)+" / 10"],["現在値（最終確定足）",num(price)],
-        ["Entry",num(p.entry)],["第1利確",num(p.target1)],["最終利確",num(p.target2)],["Alert",num(p.alert)],
+        ["投資妙味",scoreText(s.investment)],["Entry品質",scoreText(s.entry)],[expired||inputVersion!==resultVersion?"分析時の株価":"現在値（参考・遅延あり）",num(r.metadata.automatic?.current_quote?.price??price)],
+        [label.startsWith("評価保留")?"Entry候補（未確定）":"推奨Entry",num(p.entry)],["第1利確",num(p.target1)],["最終利確",num(p.target2)],["Alert",num(p.alert)],
         ["第1損切",num(p.stop1)],["最終損切",num(p.stop2)],["RR",num(p.rr)],["データ信頼度",num(r.confidence?.value)+" / 100"]
       ].map(([k,v])=>metric(k,v)).join("")+'</div>',
       '<p class="j-concern"><b>最大懸念</b> '+esc(findings[0]?.reason||d.wait_reasons?.[0]||"記録された懸念なし")+'</p>',
+      (label.startsWith("評価保留")?'<p class="j-muted">価格戦略は取得済み価格からの参考候補です。買い推奨は未確定です。</p>':""),
+      (r.metadata.automatic?.current_quote?.observed_at?'<p class="j-muted">株価の観測日時：'+esc(new Date(r.metadata.automatic.current_quote.observed_at).toLocaleString("ja-JP",{timeZone:"Asia/Tokyo"}))+'（日本時間）</p>':""),
       detail("時間軸・価格条件を変更",'<div class="j-grid"><label>表示する時間軸<select id="j-horizon">'+Object.keys(results).map(h=>opt(h,names[h])).join("")+'</select></label>'+
       '<label>価格・決算方針<select id="j-scenario">'+keys.map(k=>opt(k,k.replace(":avoid","・決算を跨がない").replace(":allow","・決算を跨ぐ"))).join("")+'</select></label></div>'),
       '<p id="j-stale" class="j-error" role="status">'+(inputVersion!==resultVersion?"保存された分析です。現在の入力との一致を確認して再分析してください。":"")+'</p>',
@@ -177,10 +181,16 @@ export function createJudgment(root,getUser,getSecurities) {
       detail("今買う vs 待つ・撤退条件",'<div class="j-grid"><div><h3>今買う根拠</h3>'+list(d.buy_reasons)+'</div><div><h3>待つ根拠</h3>'+list(d.wait_reasons)+'</div></div><h3>投資前提が崩れた場合</h3>'+list(r.metadata.exit_conditions)+'<p>価格構造の無効化：'+esc(text(p.invalidation))+'</p><h3>支配的材料による補正</h3>'+list(d.overrides)),
       detail("独立した事前確認・Critical / Severe / Warning",findings.map(f=>'<div class="j-finding"><b>'+esc(f.severity+" · "+f.code)+'</b><p>'+esc(f.reason)+'</p><small>対応：'+esc(f.resolution||"根拠と条件を再確認")+' / Evidence: '+esc((f.evidence_ids||[]).join(", "))+'</small></div>').join("")||"<p>警告なし</p>"),
       d.approval_required?detail("重大警告を確認して記録",'<p>対象の条件判断：'+esc(d.candidate||d.label||d.status)+'</p><p>承認は対象分析と価格プランだけに有効です。注文は実行しません。</p><p id="j-approval-status"></p>'+(d.approval_eligible&&!r.metadata.is_demo&&!expired?check("approval-confirm","上の警告・残存リスク・撤退条件を確認した")+'<div class="j-actions"><button type="button" class="secondary-button" data-approval="approved">条件を承認して記録</button><button type="button" class="secondary-button" data-approval="rejected">拒否を記録</button></div>':"<p>現在の条件では承認できません。</p>")):"",
-      detail("判断材料・採点の根拠",'<p>構造化評価 '+num(s.structured)+' × 70% ＋ 定性コンテキスト '+num(s.context)+' × 30%</p><p>投資妙味：'+esc(s.status)+' ／ Entry品質：'+esc(s.entry_status)+'</p>'+Object.entries(s.items||{}).map(([id,row])=>'<div class="j-evidence"><b>'+esc(id+" "+(catalog?.cards[id]?.label||""))+' — '+num(row.score)+'</b><p>'+esc(row.reason)+'</p><p class="j-muted">反証：'+esc(row.counter_reason)+'</p><small>Evidence: '+esc((row.evidence_ids||[]).join(", "))+'</small></div>').join("")+'<h3>不足項目</h3>'+list(s.missing)),
+      detail("不足データ",list(r.metadata.automatic?.missing||[])+list((s.missing||[]).map(id=>catalog?.cards[id]?.label||id))),
+      detail("判断材料・採点の根拠",'<p>構造化評価 '+num(s.structured)+' × 70% ＋ 定性コンテキスト '+num(s.context)+' × 30%</p><p>投資妙味：'+esc(s.status)+' ／ Entry品質：'+esc(s.entry_status)+'</p>'+Object.entries(s.items||{}).map(([id,row])=>'<div class="j-evidence"><b>'+esc(catalog?.cards[id]?.label||id)+' — '+num(row.score)+'</b><p>'+esc(row.reason)+'</p><p class="j-muted">反証：'+esc(row.counter_reason)+'</p><small>Evidence: '+esc((row.evidence_ids||[]).join(", "))+'</small></div>').join("")+'<h3>不足項目</h3>'+list(s.missing)),
+      ...[
+        ["業績・将来成長",["SW-A","ML-A","ML-B","ML-D","ML-F"]],
+        ["カタリスト",["SW-C","DT-A","DT-E"]],["市場期待・織り込み",["SW-B","ML-E"]],
+        ["出来高・信用需給",["SW-E","DT-B"]],["バリュエーション・競争優位",["SW-I","SW-G","ML-H","ML-C"]]
+      ].map(([title,prefixes])=>detail(title,list(Object.entries(s.items||{}).filter(([id])=>prefixes.some(k=>id.startsWith(k))).map(([id,row])=>(catalog?.cards[id]?.label||id)+"："+(row.score==null?"未評価":Number(row.score).toFixed(1))+" / "+(row.reason||"根拠不足"))))),
       detail("週足・日足・出来高",'<p>スイング：週足は大局、日足はEntryのタイミング</p><div class="j-metrics">'+metric("週足の大局",text(r.technical.weekly_trend))+metric("確定週足",num(r.technical.weekly_count))+metric("RSI",num(r.technical.rsi))+metric("出来高比",num(r.technical.volume_ratio))+'</div><p>支持・抵抗帯の根拠</p>'+list((r.technical.bands||[]).map(x=>JSON.stringify(x)))),
-      detail("マクロ評価（順序を固定）",'<ol>'+[
-        ["セクター特定",macro.sector],["セクター地合い",macro.sector_condition],
+      detail("セクター・マクロ",'<ol>'+[
+        ["セクター特定",macro.sector||r.metadata.automatic?.sector],["セクター地合い",macro.sector_condition],
         ["主要ドライバー",(macro.drivers||[]).map(x=>x.name||x).join("、")],
         ["企業の感応度",macro.company_sensitivity],["セクター要因と個別材料の強弱",macro.dominant_force]
       ].map(([k,v])=>'<li><b>'+esc(k)+'</b><p>'+esc(v||"不足")+'</p></li>').join("")+'</ol><p>個別材料：'+esc(macro.specific_factors||"不足")+'</p><p>根拠が揃っているか：'+(macro.valid?"確認済み":"不足")+'</p>'),
@@ -220,7 +230,7 @@ export function createJudgment(root,getUser,getSecurities) {
     mounted=true;
     root.classList.add("judgment");
     root.innerHTML=[
-      '<div id="j-result" class="panel j-result"><p class="j-muted">銘柄と根拠を入力すると、ここに結論・価格戦略を表示します。</p></div>',
+      '<div id="j-result" class="panel j-result"><p class="j-muted">銘柄を入力すると、ここに結論・価格戦略を表示します。</p></div>',
       '<p id="j-message" role="status" aria-live="polite"></p>',
       '<div class="panel j-inputs"><h2>銘柄を判断する</h2><div class="j-grid">',
       input("symbol","銘柄名・銘柄コード","text",'list="j-securities" autocomplete="off" placeholder="例：7203 トヨタ自動車"'),
@@ -255,6 +265,31 @@ export function createJudgment(root,getUser,getSecurities) {
       '<div class="j-actions">'+button("analyze","3つの時間軸で分析して保存",true)+button("retry","接続を再確認")+'</div><p class="j-muted">分析はログインした本人の履歴へ保存します。情報不足は未評価として表示します。</p></div>',
       detail("Firestoreの分析履歴（最新20件）",button("refresh","履歴を更新")+'<div id="j-history"></div>')
     ].join("");
+    const legacy=root.querySelector(".j-inputs");
+    const normal=document.createElement("div");normal.className="panel j-inputs";
+    normal.innerHTML='<h2>銘柄を判断する</h2><div class="j-grid" id="j-basic"></div><div class="j-actions" id="j-submit"></div>';
+    const basic=normal.querySelector("#j-basic");
+    basic.append($("symbol").closest("label"),$("securities"),$("entry").closest("label"));
+    const action=$("analyze");action.textContent="銘柄を判断する";normal.querySelector("#j-submit").append(action);
+    const options=document.createElement("details");options.className="j-detail";
+    options.innerHTML='<summary>詳細条件</summary><div class="j-detail-body"></div>';
+    options.lastElementChild.append($("policy").closest("label"));normal.append(options);
+    const supplement=document.createElement("details");supplement.id="j-supplement";supplement.className="j-detail";supplement.hidden=true;
+    supplement.innerHTML='<summary>不足データを補完する</summary><div class="j-detail-body"><p id="j-missing-help"></p>'+
+      input("extra-csv","自動取得できなかった日足をCSVで補完","file",'accept=".csv"')+
+      '<p class="j-muted">銘柄・日時・OHLCV・価格調整基準を含むCSVに対応します。</p>'+
+      area("extra-notes","追加で確認できた情報（資料名・公表日・出典と内容）")+
+      input("extra-image","補完画像（PNG/JPEG・6MB以内）","file",'accept="image/png,image/jpeg"')+
+      input("extra-image-date","画像を確認・取得した日時","datetime-local")+
+      check("extra-image-confirm","画像の銘柄・日時を確認した。口座情報などは含めていない")+
+      '<p class="j-muted">画像は根拠として保存します。数値の自動読取りには未対応です。</p>'+
+      '<p class="j-muted">補足は根拠として保存します。未確認の事実や採点を自動で確定しません。</p></div>';
+    normal.append(supplement);
+    legacy.classList.remove("j-inputs");legacy.classList.add("j-development");legacy.hidden=true;
+    legacy.before(normal);$("result").hidden=true;
+    const historyDetails=$("history").closest("details");historyDetails.querySelector("summary").textContent="判定履歴";
+    historyDetails.addEventListener("toggle",()=>{if(historyDetails.open&&!historyDetails.dataset.loaded)work(async()=>{await history();historyDetails.dataset.loaded="true";});});
+    $("symbol").addEventListener("keydown",event=>{if(event.key==="Enter"){event.preventDefault();$("analyze").click();}});
     const now=new Date(),past=new Date(now);past.setFullYear(past.getFullYear()-4);
     set("asof",now.toISOString());set("start",past.toISOString().slice(0,10));set("end",now.toISOString().slice(0,10));
     root.querySelector(".j-inputs").addEventListener("input",changed);
@@ -313,15 +348,27 @@ export function createJudgment(root,getUser,getSecurities) {
     on("save-input",async()=>download("judgment-input-"+resolveSymbol().code+".json",currentMeta()));
     on("apply-json",async()=>{const m=JSON.parse(val("metadata-json"));if(!m||Array.isArray(m)||typeof m!=="object")throw new Error("JSONオブジェクトを入力してください。");hydrate(m);message("詳細JSONを入力欄へ反映しました。");});
     on("analyze",async()=>{
-      if(!csv)throw new Error("日足を取得するかCSVを読み込んでください。");
-      const stock=resolveSymbol(),intraday=$("intraday").files[0];
-      const payload={...stock,symbol:stock.code,as_of:val("asof"),entry:val("entry"),policy:val("policy"),csv,
-        metadata:currentMeta(),adjustment:val("adjustment"),confirmed:checked("csv-confirm"),close_time:val("close-time"),
-        intraday_csv:intraday?await bytes64(intraday):undefined};
-      const v=inputVersion,response=await api("analyze",payload);
-      results=response.results;recommended=response.recommended;horizon=recommended[0]||"swing";scenario="";resultVersion=v;
-      renderResult();$("result").scrollIntoView({behavior:"smooth",block:"start"});message("3つの時間軸を分析し、本人の履歴に保存しました。");
-      await history();
+      const query=val("symbol"),file=$("extra-csv").files[0],picture=$("extra-image").files[0];
+      if(!query)throw new Error("日本株の銘柄名または銘柄コードを入力してください。");
+      message("株価などを自動取得し、3つの時間軸を確認しています…");
+      const payload={symbol:query,entry:val("entry"),policy:val("policy"),
+        supplement:{csv:file?await bytes64(file):undefined,notes:val("extra-notes"),
+          image:picture?await bytes64(picture):undefined,image_confirmed:checked("extra-image-confirm"),
+          image_observed:picture&&val("extra-image-date")?new Date(val("extra-image-date")).toISOString():undefined}};
+      const v=inputVersion,response=await api("automatic",payload);
+      results=response.results;recommended=response.recommended||[];horizon=recommended[0]||"swing";scenario="";resultVersion=v;
+      if(!catalog){try{catalog=await api("catalog");}catch{}}
+      $("supplement").hidden=false;
+      $("missing-help").textContent=(response.missing||[]).join("、");
+      if(Object.keys(results).length)renderResult();
+      else {
+        $("result").hidden=false;
+        $("result").innerHTML='<h2>'+esc(response.symbol+" "+response.name)+'</h2><div class="j-verdict"><strong>評価保留</strong></div><p>判断に必要な株価情報を取得できませんでした。</p>'+detail("不足データ",list(response.missing),true);
+      }
+      message((response.notices?.length?"一部データを自動取得できませんでした。取得済み情報で分析しています。 ":"")+
+        (response.saved?"分析結果を履歴に保存しました。":"分析履歴はまだ保存されていません。"));
+      $("result").scrollIntoView({behavior:"smooth",block:"start"});
+      const hd=$("history").closest("details");delete hd.dataset.loaded;
     });
     on("refresh",history);
     evidenceList();
@@ -332,7 +379,7 @@ export function createJudgment(root,getUser,getSecurities) {
     cardGuide();message("銘柄判断を利用できます。");await history();
   }
   return {
-    open() {if(!mounted) {mount();work(connect);} },
+    open() {if(!mounted) mount(); },
     reset() {generation++;mounted=false;catalog=null;metadata={};csv="";results={};recommended=[];busy=false;inputVersion=0;resultVersion=-1;root.removeAttribute("aria-busy");root.replaceChildren();},
   };
 }
