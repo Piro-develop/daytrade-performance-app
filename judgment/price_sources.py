@@ -121,7 +121,7 @@ def failure_log(provider, symbol, interval, stage, exc):
     # No response body, arbitrary exception message, UID, bearer or user input.
     response = getattr(exc, "response", None)
     status = getattr(response, "status_code", None)
-    known = {"wrong_market", "no_completed_bars", "empty_price_response", "conflicting_bars", "response_limit", "missing_timezone"}
+    known = {"wrong_market", "no_completed_bars", "empty_price_response", "conflicting_bars", "response_limit", "missing_timezone", "latest_completed_bar_missing"}
     reason = str(exc) if str(exc) in known else "upstream_failure"
     LOG.warning("price_fetch source=%s symbol=%s interval=%s stage=%s status=failed http=%s error=%s reason=%s",
                 provider, symbol, interval, stage, status, type(exc).__name__, reason)
@@ -133,6 +133,8 @@ def chart(symbol, interval, now=None, fetch=download):
         raise ValueError("invalid_symbol")
     if interval != "1d":
         raise ValueError("unsupported_interval")
+    partial = None
+    partial_observed = None
     for i, base in enumerate(CHARTS):
         provider, stage = "yahoo-query" + str(i + 1), "download"
         try:
@@ -149,17 +151,31 @@ def chart(symbol, interval, now=None, fetch=download):
             meta.update(provider=provider, source="Yahoo Finance 公開株価", adjustment_basis="yahoo_split_adjusted")
             stage = "completed_bars"
             rows, _ = normalize_chart(data, symbol, interval, now)
+            result = (data, requests.Request("GET", url, params=params).prepare().url, hashlib.sha256(raw).hexdigest())
+            observed = datetime.fromisoformat(rows[-1]["timestamp"])
+            completed = [session_close(datetime.fromtimestamp(t, timezone.utc).astimezone(JST).date()) for t in data["timestamp"]]
+            if any(observed < t <= now for t in completed):
+                meta["incomplete_latest"] = True
+                meta["source_note"] = "Yahoo分割調整済み価格。最新確定日の値が欠損しているため、それ以前の確定足を使用。"
+                if partial_observed is None or observed > partial_observed:
+                    partial, partial_observed = result, observed
+                raise ValueError("latest_completed_bar_missing")
             LOG.info("price_fetch source=%s symbol=%s interval=%s status=ok bars=%s observed=%s",
                      provider, symbol, interval, len(rows), rows[-1]["timestamp"])
-            return data, requests.Request("GET", url, params=params).prepare().url, hashlib.sha256(raw).hexdigest()
+            return result
         except ERRORS as exc:
             failure_log(provider, symbol, interval, stage, exc)
     try:
         data, url, hash_value = minkabu_chart(symbol, interval, now, fetch)
         rows, _ = normalize_chart(data, symbol, interval, now)
+        if partial_observed is not None and datetime.fromisoformat(rows[-1]["timestamp"]) <= partial_observed:
+            return partial
         LOG.info("price_fetch source=minkabu symbol=%s interval=%s status=ok bars=%s observed=%s",
                  symbol, interval, len(rows), rows[-1]["timestamp"])
         return data, url, hash_value
     except ERRORS as exc:
         failure_log("minkabu", symbol, interval, "download_or_completed_bars", exc)
+        if partial is not None:
+            LOG.warning("price_fetch symbol=%s interval=%s status=partial observed=%s",symbol,interval,partial_observed.isoformat())
+            return partial
         raise ValueError("public prices unavailable") from exc

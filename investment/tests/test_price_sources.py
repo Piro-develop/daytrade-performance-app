@@ -22,9 +22,6 @@ def raw_fetch(items):
 class PriceSourceTests(unittest.TestCase):
 
 
-
-
-
     def test_daily_closed_prices_and_volume_retained(self):
         items=[dict(daily_rows()[0],date="2026-09-15"),dict(daily_rows()[1],date="2026-09-14")]
         data,_,_=prices.minkabu_chart("4461","1d",NOW,raw_fetch(items))
@@ -61,11 +58,27 @@ class PriceSourceTests(unittest.TestCase):
         data,_,_=prices.chart("4461","1d",NOW,fetch)
         self.assertEqual(data["meta"]["provider"],"minkabu")
 
+    def test_latest_closed_day_missing_uses_fallback_without_discarding_older_data(self):
+        stamps=[int((NOW-timedelta(days=i)).replace(hour=9).timestamp()) for i in (1,0)]
+        data={"meta":{"symbol":"4461.T","currency":"JPY","instrumentType":"EQUITY","exchangeName":"JPX"},
+              "timestamp":stamps,"indicators":{"quote":[{k:[100,None] for k in ("open","high","low","close","volume")}]}}
+        def fetch(url,params):
+            return json.dumps({"chart":{"result":[data]}} if "yahoo.com" in url else daily_rows()).encode()
+        result,_,_=prices.chart("4461","1d",NOW,fetch)
+        self.assertEqual(result["meta"]["provider"],"minkabu")
+        rows,_=prices.normalize_chart(result,"4461","1d",NOW)
+        self.assertTrue(rows[-1]["timestamp"].startswith("2026-09-15"))
+        def fallback_down(url,params):
+            if "yahoo.com" not in url:raise requests.ConnectionError()
+            return fetch(url,params)
+        result,_,_=prices.chart("4461","1d",NOW,fallback_down)
+        self.assertTrue(result["meta"]["incomplete_latest"])
+        rows,_=prices.normalize_chart(result,"4461","1d",NOW)
+        self.assertTrue(rows[-1]["timestamp"].startswith("2026-09-14"))
+
     def test_all_sources_fail_do_not_fabricate_prices(self):
         with self.assertRaisesRegex(ValueError,"public prices unavailable"):
             prices.chart("4461","1d",NOW,lambda *_:b"[]")
-
-
 
 
 if __name__ == "__main__":unittest.main()

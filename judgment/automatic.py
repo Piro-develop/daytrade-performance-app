@@ -100,6 +100,8 @@ def acquire(query,now=None):
             " 確定日足。"+f" {len(rows)}本",hash_value,observed=rows[-1]["timestamp"],published=stamp))
         if data.get("meta",{}).get("provider")=="minkabu":
             notices.append("日足"+"は代替の公開チャートから取得しました（15分以上遅延）。")
+        if data.get("meta",{}).get("incomplete_latest"):
+            notices.append("最新確定日の日足が欠けているため、それ以前の確定足による暫定分析です。")
         if omitted:notices.append(f"価格が欠けた{omitted}本を除外しました。欠損値は補っていません。")
         if key=="daily":
             output["csv"]=csv_bytes(rows);meta["price_source"]=data.get("meta",{}).get("source","Yahoo Finance 公開株価")
