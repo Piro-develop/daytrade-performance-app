@@ -2,7 +2,7 @@
 from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 import csv
-from datetime import datetime,timedelta,timezone,time,date
+from datetime import datetime,timezone,date
 from io import BytesIO,StringIO
 import json,math,re,threading,unicodedata,zipfile
 import xml.etree.ElementTree as ET
@@ -10,23 +10,13 @@ from pathlib import Path
 import requests
 from investment_app.models import InputError,Evidence,plain,digest,JST
 from investment_app.public_data import PublicContextProvider
+from .price_sources import chart as _chart, normalize_chart, download
 
 JPX_LIST="https://www.jpx.co.jp/markets/statistics-equities/misc/tvdivq0000001vg2-att/data_j.xlsx"
 JPX_TICKS="https://www.jpx.co.jp/equities/trading/domestic/07.html"
 JPX_HOURS="https://www.jpx.co.jp/equities/trading/domestic/01.html"
-CHARTS=("https://query1.finance.yahoo.com/v8/finance/chart/","https://query2.finance.yahoo.com/v8/finance/chart/")
 _cache={};_lock=threading.Lock()
 TICKS=[(1000,.1,1),(3000,.5,1),(5000,1,5),(10000,1,10),(30000,5,10),(50000,10,50),(100000,10,100),(300000,50,100),(500000,100,500),(1000000,100,1000),(3000000,500,1000),(5000000,1000,5000),(10000000,1000,10000),(30000000,5000,10000),(50000000,10000,50000),(None,10000,100000)]
-
-def download(url,params=None):
-    with requests.get(url,params=params,timeout=(5,12),stream=True,allow_redirects=False,
-                      headers={"User-Agent":"TradingJournal/1.0"}) as r:
-        r.raise_for_status();parts=[];size=0
-        for part in r.iter_content(65536):
-            size+=len(part)
-            if size>8_000_000:raise ValueError("response limit")
-            parts.append(part)
-        return b"".join(parts)
 
 def reference_rows(raw):
     ns={"s":"http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
@@ -71,38 +61,7 @@ def evidence(eid,source,url,stamp,summary,hash_value=None,observed=None,publishe
     return plain(Evidence(eid,source,url,observed or stamp,published or stamp,stamp,summary,hash_value or digest(summary),"public",.8))
 
 def chart(symbol,interval):
-    last=None
-    for base in CHARTS:
-        try:
-            url=base+symbol+".T"
-            raw=download(url,{"range":"5y" if interval=="1d" else "1mo","interval":interval,"events":"splits"})
-            data=json.loads(raw)["chart"]["result"][0]
-            meta=data["meta"]
-            if meta.get("symbol")!=symbol+".T" or meta.get("currency")!="JPY" or meta.get("instrumentType")!="EQUITY" or meta.get("exchangeName") not in {"JPX","TYO","OSA"}:raise ValueError("wrong market")
-            return data,url,digest(raw.hex())
-        except (requests.RequestException,ValueError,KeyError,TypeError,IndexError) as exc:last=exc
-    raise ValueError("public prices unavailable") from last
-
-def normalize_chart(data,symbol,interval,now):
-    stamps=data.get("timestamp",[]);quotes=data["indicators"]["quote"][0];rows=[];omitted=0
-    for i,stamp in enumerate(stamps):
-        start=datetime.fromtimestamp(stamp,timezone.utc).astimezone(JST)
-        if interval=="1d":
-            end=datetime.combine(start.date(),time(15,30) if start.date()>=date(2024,11,5) else time(15),JST)
-        else:
-            # Yahoo timestamps identify the opening of each bar. Exclude auction marker/unfinished bars.
-            if start.minute%5 or start.second or start.microsecond or not (time(9)<=start.time()<time(11,30) or time(12,30)<=start.time()<time(15,30)):continue
-            end=start+timedelta(minutes=5)
-        if end>now:continue
-        if interval!="1d" and end.astimezone(JST).date()!=now.astimezone(JST).date():continue
-        try:
-            values={k:float(quotes[k][i]) for k in ("open","high","low","close","volume")}
-            if not all(math.isfinite(v) for v in values.values()) or values["volume"]<0 or min(values[k] for k in ("open","high","low","close"))<=0:raise ValueError()
-            if values["high"]<max(values["open"],values["close"],values["low"]) or values["low"]>min(values["open"],values["close"],values["high"]):raise ValueError()
-        except (ValueError,TypeError,KeyError,IndexError):omitted+=1;continue
-        rows.append({"symbol_code":symbol,"timestamp":end.isoformat(),**values,"adjustment_basis":"yahoo_split_adjusted"})
-    if not rows:raise ValueError("no completed bars")
-    return rows,omitted
+    return _chart(symbol,interval,fetch=download)
 
 def csv_bytes(rows):
     out=StringIO();writer=csv.DictWriter(out,fieldnames=list(rows[0]));writer.writeheader();writer.writerows(rows)
@@ -136,14 +95,19 @@ def acquire(query,now=None):
         except (ValueError,KeyError,TypeError):
             notices.append("日足の確定データが不足しています。" if key=="daily" else "当日の確定5分足がありません。");continue
         eid="public-"+key+"-"+hash_value[:16]
-        meta["evidence"].append(evidence(eid,"Yahoo Finance 公開株価",url,stamp,
-            ("分割調整済み日足。配当調整終値をOHLCへ混在させない。" if key=="daily" else "当日の確定5分足。開始時刻から終了時刻へ変換。")+f" {len(rows)}本",hash_value,observed=rows[-1]["timestamp"],published=rows[-1]["timestamp"]))
+        meta["evidence"].append(evidence(eid,data.get("meta",{}).get("source","Yahoo Finance 公開株価"),url,stamp,
+            (data.get("meta",{}).get("source_note") or "Yahoo分割調整済み価格。配当調整終値をOHLCへ混在させない。")+
+            (" 確定日足。" if key=="daily" else " 確定5分足。時刻は終了時刻。")+f" {len(rows)}本",hash_value,observed=rows[-1]["timestamp"],published=stamp))
+        if data.get("meta",{}).get("provider")=="minkabu":
+            notices.append(("日足" if key=="daily" else "5分足")+"は代替の公開チャートから取得しました（15分以上遅延）。")
+        if key=="intraday" and rows[-1]["timestamp"][:10]!=asof.astimezone(JST).date().isoformat():
+            notices.append("5分足は直近営業日の確定足です。当日のデイトレ判断には使用しません。")
         if omitted:notices.append(f"価格が欠けた{omitted}本を除外しました。欠損値は補っていません。")
         if key=="daily":
-            output["csv"]=csv_bytes(rows);meta["price_source"]="Yahoo Finance 公開日足"
+            output["csv"]=csv_bytes(rows);meta["price_source"]=data.get("meta",{}).get("source","Yahoo Finance 公開株価")
             quote=data["meta"];qt=quote.get("regularMarketTime");qp=quote.get("regularMarketPrice")
             if isinstance(qt,(int,float)) and isinstance(qp,(int,float)) and math.isfinite(qp) and qp>0 and qt<=asof.timestamp():
-                meta["current_quote"]={"price":qp,"observed_at":datetime.fromtimestamp(qt,timezone.utc).isoformat(),"source":"Yahoo Finance","delayed":True}
+                meta["current_quote"]={"price":qp,"observed_at":datetime.fromtimestamp(qt,timezone.utc).isoformat(),"source":meta["price_source"],"delayed":True}
         else:
             meta.update(intraday_bars=rows,intraday_interval="5m",intraday_closed_confirmed=True,intraday_evidence_id=eid)
     if reference and stock.get("as_of"):

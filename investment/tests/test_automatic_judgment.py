@@ -79,3 +79,27 @@ def test_price_level_ticks_keep_rr_and_stop_first():
     assert float(first.stop1)==990.0
     assert float(first.rr)==pytest.approx((1009.5-1005)/(1005-990))
     if len(plans)>1:assert plans[1].stop1==first.stop1 and plans[1].target1==first.target1
+
+
+def test_fallback_source_and_observation_time_survive_to_evidence(monkeypatch):
+    from judgment.price_sources import minkabu_chart
+    now=datetime.now(timezone.utc)
+    previous=(now.astimezone(JST)-timedelta(days=1)).replace(hour=9,minute=0,second=0,microsecond=0)
+    common={"ric":"4461.T","currency_code":"JPY","open":100,"high":110,"low":90,"close":105,"volume":100}
+    daily=[dict(common,date=previous.date().isoformat())]
+    minutes=[dict(common,date=(previous+timedelta(minutes=i)).isoformat()) for i in range(5)]
+    def fetch(symbol,interval):
+        items=daily if interval=="1d" else minutes
+        return minkabu_chart(symbol,interval,now,lambda *_:json.dumps(items).encode())
+    monkeypatch.setattr(automatic,"company_reference",lambda:([{"code":"4461","name":"第一工業製薬"}],"hash",now.isoformat()))
+    monkeypatch.setattr(automatic,"chart",fetch)
+    monkeypatch.setattr(automatic.PublicContextProvider,"fetch",lambda *a:{"evidence":[]})
+    result=automatic.acquire("4461")
+    assert result["csv"] and len(result["metadata"]["intraday_bars"])==1
+    for ev in result["metadata"]["evidence"]:
+        assert ev["source_name"]=="みんかぶ公開チャート"
+        assert "mkdd.net" in ev["source_uri"]
+        assert ev["observed_at"].startswith(previous.date().isoformat())
+        assert ev["observed_at"]!=ev["fetched_at"]
+        assert ev["content_hash"]
+    assert any("当日のデイトレ判断には使用しません" in n for n in result["notices"])
