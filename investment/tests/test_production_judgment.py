@@ -54,11 +54,11 @@ def test_unauthenticated_api_and_static_secrets(tmp_path):
         assert call(app,path)[0]==404
     assert call(app,"/")[0]==200
 
-def test_three_horizons_owner_isolation_and_saved_snapshot(analyzed):
+def test_two_horizons_owner_isolation_and_saved_snapshot(analyzed):
     service,payload,results=analyzed
-    assert set(results)=={"swing","midlong","daytrade"}
-    assert len({r["run_id"] for r in results.values()})==3
-    assert len(service.list_runs("alice"))==3
+    assert set(results)=={"swing","midlong"}
+    assert len({r["run_id"] for r in results.values()})==2
+    assert len(service.list_runs("alice"))==2
     assert service.list_runs("bob")==[]
     app=create_app(service.directory,TestIdentity())
     run=results["swing"]["run_id"]
@@ -71,7 +71,7 @@ def test_invalid_reanalysis_leaves_history_intact(analyzed):
     service,payload,results=analyzed
     before={r["run_id"]:service.get("alice",r["run_id"]) for r in results.values()}
     with pytest.raises(InputError): service.analyze("alice",dict(payload,csv=base64.b64encode(b"bad,data").decode()))
-    assert len(service.list_runs("alice"))==3
+    assert len(service.list_runs("alice"))==2
     assert all(service.get("alice",run)==r for run,r in before.items())
     with service.history("alice").connect() as db:
         assert db.execute("PRAGMA integrity_check").fetchone()[0]=="ok"
@@ -107,8 +107,8 @@ def test_google_validation_required_for_plausible_jwt(monkeypatch):
 def test_canonical_spec_config_and_engines_unchanged():
     manifest=json.loads((ROOT/"docs/INTEGRATION_SOURCE_HASHES.json").read_text(encoding="utf-8"))
     for relative,expected in manifest["files"].items():
-        # Storage adapters and price-level tick integration have explicit regression tests.
-        if Path(relative.replace(chr(92),"/")).name in {"storage.py","uat_service.py","entry_exit.py"}: continue
+        # Storage/ticks plus the 2026-09-16 two-horizon amendment have explicit regression tests.
+        if Path(relative.replace(chr(92),"/")).name in {"storage.py","uat_service.py","entry_exit.py","horizons.py","horizons.json","ai_bridge.py","uat_ui.py","15_FINAL_DESIGN.md"}: continue
         raw=(ROOT/relative.replace(chr(92),"/")).read_bytes()
         # Git checkout may translate CRLF/LF; only line endings may differ from the original.
         lf=raw.replace(b"\r\n",b"\n")

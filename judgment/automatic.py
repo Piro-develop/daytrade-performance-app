@@ -74,42 +74,38 @@ def acquire(query,now=None):
         stocks=json.loads((Path(__file__).resolve().parents[1]/"stocks.json").read_text(encoding="utf-8"))["securities"]
         notices.append("業種と呼値区分の最新情報を取得できませんでした。")
     stock=resolve(query,stocks);symbol=stock["code"]
-    with ThreadPoolExecutor(max_workers=3) as pool:
+    with ThreadPoolExecutor(max_workers=2) as pool:
         jobs={key:pool.submit(fn) for key,fn in {
-            "daily":lambda:chart(symbol,"1d"),"intraday":lambda:chart(symbol,"5m"),
+            "daily":lambda:chart(symbol,"1d"),
             "macro":lambda:PublicContextProvider().fetch("ecb")}.items()}
         received={}
         for key,job in jobs.items():
             try:received[key]=job.result()
             except (requests.RequestException,InputError,ValueError,KeyError,TypeError,IndexError):
-                notices.append({"daily":"日足株価","intraday":"当日の確定5分足","macro":"為替参考値"}[key]+"を自動取得できませんでした。")
+                notices.append({"daily":"日足株価","macro":"為替参考値"}[key]+"を自動取得できませんでした。")
     asof=now or datetime.now(timezone.utc);stamp=asof.isoformat()
     meta={"symbol":symbol,"name":stock["name"],"as_of":stamp,"evidence":[],"assessments":[],
           "macro":{"sector":stock.get("sector","")},"automatic":{"notices":notices,"assessment_provider":"unconfigured"},
           "is_demo":False}
     output={"symbol":symbol,"name":stock["name"],"as_of":stamp,"metadata":meta,"notices":notices,"csv":None}
-    for key,interval in (("daily","1d"),("intraday","5m")):
+    for key,interval in (("daily","1d"),):
         if key not in received:continue
         data,url,hash_value=received[key]
         try:rows,omitted=normalize_chart(data,symbol,interval,asof)
         except (ValueError,KeyError,TypeError):
-            notices.append("日足の確定データが不足しています。" if key=="daily" else "当日の確定5分足がありません。");continue
+            notices.append("日足の確定データが不足しています。");continue
         eid="public-"+key+"-"+hash_value[:16]
         meta["evidence"].append(evidence(eid,data.get("meta",{}).get("source","Yahoo Finance 公開株価"),url,stamp,
             (data.get("meta",{}).get("source_note") or "Yahoo分割調整済み価格。配当調整終値をOHLCへ混在させない。")+
-            (" 確定日足。" if key=="daily" else " 確定5分足。時刻は終了時刻。")+f" {len(rows)}本",hash_value,observed=rows[-1]["timestamp"],published=stamp))
+            " 確定日足。"+f" {len(rows)}本",hash_value,observed=rows[-1]["timestamp"],published=stamp))
         if data.get("meta",{}).get("provider")=="minkabu":
-            notices.append(("日足" if key=="daily" else "5分足")+"は代替の公開チャートから取得しました（15分以上遅延）。")
-        if key=="intraday" and rows[-1]["timestamp"][:10]!=asof.astimezone(JST).date().isoformat():
-            notices.append("5分足は直近営業日の確定足です。当日のデイトレ判断には使用しません。")
+            notices.append("日足"+"は代替の公開チャートから取得しました（15分以上遅延）。")
         if omitted:notices.append(f"価格が欠けた{omitted}本を除外しました。欠損値は補っていません。")
         if key=="daily":
             output["csv"]=csv_bytes(rows);meta["price_source"]=data.get("meta",{}).get("source","Yahoo Finance 公開株価")
             quote=data["meta"];qt=quote.get("regularMarketTime");qp=quote.get("regularMarketPrice")
             if isinstance(qt,(int,float)) and isinstance(qp,(int,float)) and math.isfinite(qp) and qp>0 and qt<=asof.timestamp():
                 meta["current_quote"]={"price":qp,"observed_at":datetime.fromtimestamp(qt,timezone.utc).isoformat(),"source":meta["price_source"],"delayed":True}
-        else:
-            meta.update(intraday_bars=rows,intraday_interval="5m",intraday_closed_confirmed=True,intraday_evidence_id=eid)
     if reference and stock.get("as_of"):
         refdate=datetime.strptime(stock["as_of"],"%Y%m%d").replace(tzinfo=JST)
         eid="jpx-company-"+reference[1][:16]

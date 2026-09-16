@@ -19,8 +19,8 @@ def source():
 def test_spec_weights_and_rr():
     h=settings()
     assert list(h["midlong"]["investment_weights"].values())==[25,15,13,12,10,8,7,6,2,2]
-    assert list(h["daytrade"]["investment_weights"].values())==[30,20,20,15,15]
-    assert len(all_cards())==70
+    assert h["active_horizons"]==["swing","midlong"]
+    assert len(all_cards())==55
     assert rr(1000,1100,950)==Decimal(2)
 
 def test_midlong_stress_missing_and_separation(source):
@@ -33,33 +33,14 @@ def test_midlong_stress_missing_and_separation(source):
     b.metadata["assessments"]=[a for a in b.metadata["assessments"] if a["criterion_id"]!="ME-E-STRESS"]
     missing=score_horizon(b,t,p,cfg,"midlong")
     assert missing.entry is None and missing.items["ME-E"]["score"] is None
-    assert len(t["monthly"])>=24
+    assert len(t["monthly"])==0
     assert all(l["timeframe"] in ("1w","1mo") for l in t["levels"])
 
-def test_day_missing_stale_and_severe(source):
-    cfg=load_config();b=copy.deepcopy(source)
-    out,_,_=analyze_horizon(b,cfg,"daytrade")
-    assert out.plans
-    s=out.scores["現値"];p=out.plans[0]
-    assert s.investment==8
-    # Identical first-level RR and upside: 7% wait applies only to swing.
-    good=replace(s,investment=8,entry=8,status=EvaluationStatus.EVALUABLE,entry_status=EvaluationStatus.EVALUABLE)
-    plan=make_plan(1000,1040,980,evidence_ids=p.evidence_ids,trigger_confirmed=True)
-    assert decide(b,good,plan,[],cfg,"avoid","daytrade").label=="買い"
-    assert decide(b,good,plan,[],cfg,"avoid","swing").label=="押し目待ち"
-    severe=Finding("risk",Severity.SEVERE,"decision","重大条件",p.evidence_ids)
-    d=decide(b,good,plan,[severe],cfg,"avoid","daytrade")
-    assert d.approval_required and d.label=="Severe警告付き条件判断" and not d.approval_eligible
-    critical=Finding("invalid",Severity.CRITICAL,"all","評価不能")
-    assert decide(b,good,plan,[critical],cfg,"avoid","daytrade").status==EvaluationStatus.UNAVAILABLE
-    b.metadata["intraday_bars"]=[]
-    absent,_,_=analyze_horizon(b,cfg,"daytrade")
-    assert next(iter(absent.scores.values())).investment is None
 
-def test_three_horizon_atomic_storage_and_unchanged_stops(source,tmp_path):
+def test_two_horizon_atomic_storage_and_unchanged_stops(source,tmp_path):
     db=History(tmp_path/"runs.sqlite")
     results=run_all(source,db)
-    assert len(db.list_runs())==3
+    assert len(db.list_runs())==2
     for r in results.values():
         restored=db.get(r["run_id"])
         assert canonical(restored)==canonical(r)
@@ -97,12 +78,6 @@ def test_valuation_formula_and_red_earnings_rejected(source):
     b.metadata["valuation_plan"]["eps"]="-100"
     with pytest.raises(InputError): valuation_bands(b,7)
 
-def test_day_rejects_future_and_missing_ohlcv(source):
-    cfg=load_config();b=copy.deepcopy(source)
-    b.metadata["intraday_bars"][0]["timestamp"]="2026-09-10T09:05:00+09:00"
-    with pytest.raises(InputError): horizon_technical(b,cfg,"daytrade")
-    b=copy.deepcopy(source);b.metadata["intraday_bars"][0]["close"]=None
-    with pytest.raises(InputError): horizon_technical(b,cfg,"daytrade")
 
 def test_manual_evidence_hash_stable_and_ai_numbers_rejected(source):
     from investment_app.manual_input import build_metadata

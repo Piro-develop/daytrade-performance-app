@@ -12,19 +12,6 @@ from investment_app.entry_exit import plans_for
 from investment_app.config import load_config
 from test_firestore_judgment import FakeFirestore,store
 
-def test_completed_bars_only_and_no_zero_fill():
-    now=datetime(2026,9,14,10,7,tzinfo=JST)
-    stamps=[int(now.replace(hour=9,minute=m).timestamp()) for m in (0,5,10)]
-    quotes={k:[100,100,None] for k in ("open","high","low","close")}
-    quotes["volume"]=[1000,1000,1000]
-    data={"timestamp":stamps,"indicators":{"quote":[quotes]}}
-    rows,omitted=automatic.normalize_chart(data,"7203","5m",now.replace(hour=9,minute=7))
-    assert len(rows)==1 and rows[0]["timestamp"].endswith("09:05:00+09:00")
-    rows,omitted=automatic.normalize_chart(data,"7203","5m",now)
-    assert len(rows)==2 and omitted==1
-    with pytest.raises(ValueError):automatic.normalize_chart(data,"7203","1d",now)
-    assert automatic.resolve("トヨタ",[{"code":"7203","name":"トヨタ自動車"}])["code"]=="7203"
-
 def test_one_source_failure_does_not_discard_daily(monkeypatch):
     now=datetime.now(timezone.utc)
     day=now.astimezone(JST).date()-timedelta(days=4)
@@ -33,12 +20,12 @@ def test_one_source_failure_does_not_discard_daily(monkeypatch):
           "meta":{}}
     monkeypatch.setattr(automatic,"company_reference",lambda:([{"code":"7203","name":"トヨタ"}],"hash",now.isoformat()))
     def fetch(symbol,interval):
-        if interval=="5m":raise ValueError("upstream internal response")
+        assert interval=="1d"
         return data,"https://example.invalid/prices","hash"
     monkeypatch.setattr(automatic,"chart",fetch)
     monkeypatch.setattr(automatic.PublicContextProvider,"fetch",lambda *a:(_ for _ in ()).throw(InputError("internal XML error")))
     result=automatic.acquire("7203")
-    assert result["csv"] and len(result["notices"])==2
+    assert result["csv"] and len(result["notices"])==1
     assert "internal" not in str(result["notices"])
     assert result["metadata"]["assessments"]==[]
     assert not result["metadata"].get("preflight_review")
@@ -53,7 +40,7 @@ def test_automatic_engine_firestore_roundtrip_without_fake_scores(monkeypatch):
     monkeypatch.setattr(automatic,"acquire",lambda _:copy.deepcopy(response))
     db=FakeFirestore();service=JudgmentService(store=store(db))
     out=service.automatic("alice",{"symbol":"7203"})
-    assert out["saved"] and len(out["results"])==3 and db.commits==1
+    assert out["saved"] and set(out["results"])=={"swing","midlong"} and db.commits==1
     for result in out["results"].values():
         assert all(s["investment"] is None for s in result["scores"].values())
         assert all(d["label"] not in {"買い","強気買い"} for d in result["decisions"].values())
@@ -87,19 +74,19 @@ def test_fallback_source_and_observation_time_survive_to_evidence(monkeypatch):
     previous=(now.astimezone(JST)-timedelta(days=1)).replace(hour=9,minute=0,second=0,microsecond=0)
     common={"ric":"4461.T","currency_code":"JPY","open":100,"high":110,"low":90,"close":105,"volume":100}
     daily=[dict(common,date=previous.date().isoformat())]
-    minutes=[dict(common,date=(previous+timedelta(minutes=i)).isoformat()) for i in range(5)]
     def fetch(symbol,interval):
-        items=daily if interval=="1d" else minutes
+        assert interval=="1d"
+        items=daily
         return minkabu_chart(symbol,interval,now,lambda *_:json.dumps(items).encode())
     monkeypatch.setattr(automatic,"company_reference",lambda:([{"code":"4461","name":"第一工業製薬"}],"hash",now.isoformat()))
     monkeypatch.setattr(automatic,"chart",fetch)
     monkeypatch.setattr(automatic.PublicContextProvider,"fetch",lambda *a:{"evidence":[]})
     result=automatic.acquire("4461")
-    assert result["csv"] and len(result["metadata"]["intraday_bars"])==1
+    assert result["csv"] and not any("intraday" in k for k in result["metadata"])
     for ev in result["metadata"]["evidence"]:
         assert ev["source_name"]=="みんかぶ公開チャート"
         assert "mkdd.net" in ev["source_uri"]
         assert ev["observed_at"].startswith(previous.date().isoformat())
         assert ev["observed_at"]!=ev["fetched_at"]
         assert ev["content_hash"]
-    assert any("当日のデイトレ判断には使用しません" in n for n in result["notices"])
+    assert not any("5分足" in n for n in result["notices"])

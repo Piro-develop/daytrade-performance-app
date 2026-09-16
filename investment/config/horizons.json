@@ -1,8 +1,5 @@
 {
-  "version": "multi-1.0.0",
-  "monthly_min": 24,
-  "day_fresh_minutes": 5,
-  "day_provisional_minutes": 15,
+  "version": "swing-midlong-2.0.0",
   "market_close": "15:30",
   "network_timeout": 15,
   "network_max_bytes": 5000000,
@@ -33,25 +30,12 @@
     "context_prefix": "MC",
     "context_count": 5
   },
-  "daytrade": {
-    "investment_weights": {
-      "A": 30,
-      "B": 20,
-      "C": 20,
-      "D": 15,
-      "E": 15
-    },
-    "entry_weights": {
-      "A": 20,
-      "B": 20,
-      "C": 20,
-      "D": 20,
-      "E": 10,
-      "F": 10
-    },
-    "prefix": "DT",
-    "entry_prefix": "DE",
-    "context_prefix": "DC",
-    "context_count": 4
+  "active_horizons": [
+    "swing",
+    "midlong"
+  ],
+  "holding_periods": {
+    "swing": "数日〜3か月",
+    "midlong": "3か月以上"
   }
 }

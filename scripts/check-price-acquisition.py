@@ -27,7 +27,7 @@ def main():
         return download(url,params)
     failed=False
     for symbol in ("4461","7203"):
-        for interval in ("1d","5m"):
+        for interval in ("1d",):
             try:
                 data,url,_=chart(symbol,interval,now,fetch)
                 rows,omitted=normalize_chart(data,symbol,interval,now)

@@ -22,12 +22,13 @@ jobs:
         env:
           PYTHONPATH: .:investment/src
         run: |
-          python -m pytest investment/tests/test_automatic_judgment.py investment/tests/test_price_sources.py investment/tests/test_firestore_judgment.py investment/tests/test_production_judgment.py investment/tests/test_approval.py investment/tests/test_decision.py -q
+          python -m pytest investment/tests/test_automatic_judgment.py investment/tests/test_price_sources.py investment/tests/test_two_horizons.py investment/tests/test_firestore_judgment.py investment/tests/test_production_judgment.py investment/tests/test_approval.py investment/tests/test_decision.py -q
           node --check judgment.mjs
       - name: Check actual public prices for 4461 and 7203
         run: |
           python scripts/check-price-acquisition.py
           python scripts/check-price-acquisition.py --fallback
+          python scripts/check-two-horizon-analysis.py
       - name: Build production container
         run: docker build -t judgment-api .
       - name: Check production startup and authentication boundary
@@ -37,5 +38,5 @@ jobs:
             if curl --fail --silent http://127.0.0.1:8766/healthz > /tmp/judgment-health.json; then break; fi
             sleep 2
           done
-          python -c 'import json; d=json.load(open("/tmp/judgment-health.json")); assert d["ready"] and "automatic-judgment-v1" in d["features"]'
+          python -c 'import json; d=json.load(open("/tmp/judgment-health.json")); assert d["ready"] and "swing-midlong-only-v1" in d["features"]'
           test "$(curl --silent -o /dev/null -w '%{http_code}' http://127.0.0.1:8766/api/judgment/history)" = "401"

@@ -16,7 +16,7 @@ from .public_data import StooqMarketProvider,PublicContextProvider
 from .provider_registry import require_available
 from .ai_bridge import export_request,import_response
 
-LABELS={"swing":"スイング","midlong":"中長期","daytrade":"デイトレ"}
+LABELS={"swing":"スイング","midlong":"中長期"}
 AUTO=AUTO_CARDS|{"ME-E","DE-C"}
 def show_error(exc):
     st.error(str(exc) if isinstance(exc,InputError) else "入力形式または処理を確認してください。詳しくはローカルログに記録します。")
@@ -49,7 +49,7 @@ def load_input():
             upload=st.file_uploader("日足CSV（UTF-8／CP932）",type=["csv"],key="uat_prices")
             if upload: raw=upload.getvalue()
             else:
-                st.caption("CSVがない場合の貼付用。date,open,high,low,close,volume。中長期は月足24本を作れる履歴が必要です。")
+                st.caption("CSVがない場合の貼付用。date,open,high,low,close,volume。中長期は確定週足を中心に評価します。月足は任意です。")
                 frame=st.data_editor(pd.DataFrame(columns=["date","open","high","low","close","volume"]),num_rows="dynamic",key="uat_price_table")
                 if not frame.empty: raw=frame.to_csv(index=False).encode()
         else:
@@ -119,7 +119,7 @@ def edit_metadata(base):
         evrows=table_rows(rows)
     with st.expander("採点カード（時間軸別・Evidenceと理由が必須）"):
         h=st.selectbox("編集する時間軸",list(LABELS),format_func=lambda h:LABELS[h],key="uat_card_h")
-        prefixes={"swing":("SW-","SE-","SC-"),"midlong":("ML-","ME-","MC-"),"daytrade":("DT-","DE-","DC-")}[h]
+        prefixes={"swing":("SW-","SE-","SC-"),"midlong":("ML-","ME-","MC-")}[h]
         old={r["criterion_id"]:r for r in meta.get("assessments",[])}
         cards={k:v for k,v in all_cards().items() if k.startswith(prefixes) and k not in AUTO}
         values=[]
@@ -172,15 +172,6 @@ def edit_metadata(base):
             macro[key]=st.text_input(label,value=macro.get(key,""),key="uat_macro_"+key)
         macro["evidence_ids"]=refs(st.text_input("マクロ経路の根拠ID",value=",".join(macro.get("evidence_ids",[]))))
         meta["exit_conditions"]=st.text_area("撤退条件（1行1条件）",value="\n".join(meta.get("exit_conditions",[]))).splitlines()
-        intraday=st.file_uploader("当日の確定5分足CSV（timestampは足の終了日時、OHLCV）",type=["csv"],key="uat_intraday")
-        if intraday: meta["intraday_bars"]=pd.read_csv(intraday).to_dict("records")
-        meta["intraday_interval"]="5m"
-        meta["intraday_closed_confirmed"]=st.checkbox("分足が確定5分足・終了日時であることを確認",value=meta.get("intraday_closed_confirmed",False))
-        for key,label in (("intraday_evidence_id","分足の根拠ID"),("today_material_evidence_ids","当日材料の根拠ID"),
-             ("same_time_volume_evidence_ids","出来高の同時刻比較の根拠ID"),("execution_evidence_ids","約定環境の直接根拠ID")):
-            val=meta.get(key,"" if key=="intraday_evidence_id" else [])
-            text=st.text_input(label,value=val if isinstance(val,str) else ",".join(val))
-            meta[key]=text if key=="intraday_evidence_id" else refs(text)
         with st.popover("支配的材料・Severe例外根拠・カレンダー等"):
             st.caption('中長期の抵抗帯がない場合のみvaluation_planを使用可。formula: EPS*PE、currency: JPY、eps、multiple_first、multiple_final（任意）、period、assumptions、sector_suitable_confirmed: true、evidence_idsを指定。赤字のPER評価は不可。')
             extras=st.text_area("詳細補足JSON",value=json.dumps({k:meta.get(k,[] if k in ("calendar","volume_profile") else {}) for k in ("dominant_factor","severe_conditions","calendar","volume_profile","valuation_plan")},ensure_ascii=False,indent=2),height=220)
@@ -248,7 +239,7 @@ def render_uat(history,detail_renderer,logger):
         entry=st.text_input("想定Entry（任意・空欄なら現在値）",key="uat_entry")
         request_hash=digest([digest(work["csv"].hex()),meta,entry,policy])
         col1,col2=st.columns(2)
-        if col1.button("3時間軸で分析・履歴保存",type="primary"):
+        if col1.button("2時間軸で分析・履歴保存",type="primary"):
             try:
                 bundle=bundle_from_input(work["csv"],meta,meta["symbol"],meta["as_of"])
                 with st.spinner("価格構造と時間軸ごとの根拠を分析中"):
@@ -273,9 +264,9 @@ def render_uat(history,detail_renderer,logger):
         r=results[h]
         with st.expander(LABELS[h]+"の判断理由・価格候補・採点内訳・Evidence",expanded=False):
             detail_renderer(r,r["approval_hash"] if same else "changed")
-        st.download_button("3時間軸の分析結果を保存",canonical(results),file_name="multi_analysis.json")
+        st.download_button("2時間軸の分析結果を保存",canonical(results),file_name="multi_analysis.json")
     else:
-        with top: st.info("銘柄・資料を読み込み「3時間軸で分析」を押してください。開発用データでも操作できます。")
+        with top: st.info("銘柄・資料を読み込み「2時間軸で分析」を押してください。開発用データでも操作できます。")
     with st.expander("分析履歴"):
         for run in history.list_runs(15):
             r=history.get(run["run_id"])

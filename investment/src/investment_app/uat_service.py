@@ -30,7 +30,7 @@ def run_all(bundle,history,policy="unspecified",entry=None):
     from .models import digest
     r.approval_hash=digest({k:v for k,v in plain(r).items() if k!="approval_hash"})
     pending=[(r,swing,cfg)];results["swing"]=plain(r)
-    for h in ("midlong","daytrade"):
+    for h in ("midlong",):
         result,b,c=analyze_horizon(bundle,cfg,h,policy,entry)
         pending.append((result,b,c));results[h]=plain(result)
     if bundle.metadata.get("automatic"):
@@ -39,7 +39,7 @@ def run_all(bundle,history,policy="unspecified",entry=None):
             result.metadata["source_mode"]="automatic_public"
             result.approval_hash=digest({k:v for k,v in plain(result).items() if k!="approval_hash"})
             results[result.metadata["horizon"]]=plain(result)
-    # Persist the three independent snapshots in one transaction, avoiding partial groups.
+    # Persist the two independent snapshots in one transaction, avoiding partial groups.
     save_group(history,pending)
     return results
 
@@ -73,19 +73,10 @@ def demo():
             "open":round(close-2,2),"high":round(close+8,2),"low":round(close-9,2),"close":round(close,2),
             "volume":int(350000+60000*math.sin(i/9)),"adjustment_basis":"synthetic_split_adjusted"})
     meta["calendar"]=[d.strftime("%Y-%m-%d") for d in pd.bdate_range(days[0],end="2026-10-30")]
-    intraday=[]
-    times=list(pd.date_range("2026-09-09T09:05:00+09:00","2026-09-09T11:30:00+09:00",freq="5min"))
-    times+=list(pd.date_range("2026-09-09T12:35:00+09:00","2026-09-09T14:30:00+09:00",freq="5min"))
-    for i,stamp in enumerate(times):
-        close=1000+12*math.sin(i*2*math.pi/9)
-        intraday.append({"timestamp":stamp.isoformat(),"open":round(close-1,2),"high":round(close+3,2),
-            "low":round(close-5,2),"close":round(close,2),"volume":12000+i*100})
-    meta.update(intraday_bars=intraday,intraday_interval="5m",intraday_closed_confirmed=True,intraday_evidence_id="demo-structure",
-        latest_financial={"latest_confirmed":True,"period":"架空2026年度","evidence_ids":["demo-financial"]},
-        today_material_evidence_ids=["demo-news"],same_time_volume_evidence_ids=["demo-flow"],execution_evidence_ids=["demo-flow"])
+    meta.update(latest_financial={"latest_confirmed":True,"period":"架空2026年度","evidence_ids":["demo-financial"]})
     for code,card in all_cards().items():
         if code in catalog(): continue
-        ref="demo-macro" if code in ("ML-G","DT-D","DC-3") else "demo-structure" if code.startswith(("ME-","DE-")) else "demo-financial"
+        ref="demo-macro" if code in ("ML-G",) else "demo-structure" if code.startswith(("ME-",)) else "demo-financial"
         meta["assessments"].append({"criterion_id":code,"anchor":8,"evidence_ids":[ref],
             "reason":"架空設定："+card["anchors"]["8"],"counter_reason":"実在資料ではない。前提失効時に再評価。",
             "rule_version":"cards-1.0.0","evaluator":"fixture_human"})
@@ -98,6 +89,7 @@ def recommendation(results, now=None):
     # Do not compare raw scores across horizons or silently turn high scores into a buy.
     preferred=[]
     for h,r in results.items():
+        if h not in ("swing","midlong"): continue
         current=r["decisions"].get("現値:avoid") or next(iter(r["decisions"].values()))
         plan=next((p for p in r["plans"] if p["kind"]=="現値"),None)
         if plan and time_value(plan["expires_at"])>=now and current["status"]=="評価可能" and not current["approval_required"] and current["label"] in ("買い","条件付き買い","打診買い"):

@@ -82,7 +82,7 @@ def create_app(directory=None,identity=None,origins=(),store_factory=None):
             return JSONResponse({"error":"処理を完了できませんでした。入力またはサーバーログを確認してください。"},
                                 status_code=500,headers=headers)
     async def health(request):
-        return JSONResponse({"service":"trading-journal","ready":True,"features":["automatic-judgment-v1","independent-price-fallback-v1"]})
+        return JSONResponse({"service":"trading-journal","ready":True,"features":["automatic-judgment-v1","independent-price-fallback-v1","swing-midlong-only-v1"]})
     async def static(request):
         path=public_path(request.path_params.get("path",""))
         if not path: return Response("Not found",status_code=404)

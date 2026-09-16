@@ -7,7 +7,6 @@ import hashlib
 from io import BytesIO
 from pathlib import Path
 import uuid
-import pandas as pd
 from PIL import Image
 from investment_app.models import InputError,Evidence,plain,digest
 from investment_app.manual_input import normalize_csv,AUTO_CARDS
@@ -41,8 +40,8 @@ class JudgmentService:
             return self.store
         return History(self.folder(uid)/"history.sqlite")
     def catalog(self):
-        return {"cards":all_cards(),"automatic_cards":sorted(AUTO_CARDS|{"ME-E","DE-C"}),
-            "horizons":{"swing":"スイング","midlong":"中長期","daytrade":"デイトレ"}}
+        return {"cards":all_cards(),"automatic_cards":sorted(AUTO_CARDS|{"ME-E"}),
+            "horizons":{"swing":"スイング","midlong":"中長期"}}
     def analyze(self,uid,payload):
         raw=decode(payload.get("csv",""))
         symbol=str(payload.get("symbol","")).strip()
@@ -55,10 +54,6 @@ class JudgmentService:
                     input_normalization=provenance)
         # Never promote imported fixtures into real-stock analyses.
         meta["is_demo"]=bool(meta.get("is_demo",False))
-        if payload.get("intraday_csv"):
-            intraday=decode(payload["intraday_csv"])
-            try: meta["intraday_bars"]=pd.read_csv(BytesIO(intraday)).to_dict("records")
-            except Exception as exc: raise InputError("確定5分足CSVを確認してください。") from exc
         evidence=meta.get("evidence",[])
         if not isinstance(evidence,list): raise InputError("Evidenceは一覧で入力してください。")
         for ev in evidence:
@@ -101,7 +96,6 @@ class JudgmentService:
                  "最新の信用需給・同業比較","次回決算日と重要イベント",
                  "重大悪材料・投資前提・流動性の独立確認","企業感応度を含むマクロ評価","根拠に基づく定性コンテキスト評価"]
         if not meta.get("tick_size"):missing.append("最新の呼値区分")
-        if not meta.get("intraday_bars"):missing.append("当日の確定5分足（デイトレ）")
         meta["automatic"].update(missing=missing,current_quote=meta.get("current_quote"),sector=meta.get("macro",{}).get("sector"),
                                   entry_source="user" if entry else "public_quote",source_mode="automatic_public")
         if not raw:
@@ -119,9 +113,10 @@ class JudgmentService:
         rows=[]
         for row in history.list_runs(20):
             if "name" in row:
-                rows.append(row)
+                if row.get("horizon","swing") in ("swing","midlong"): rows.append(row)
                 continue
             result=history.get(row["run_id"])
+            if result["metadata"].get("horizon","swing") not in ("swing","midlong"): continue
             rows.append({**row,"name":result["name"],"horizon":result["metadata"].get("horizon","swing"),
                          "is_demo":result["metadata"].get("is_demo",False)})
         return rows

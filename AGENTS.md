@@ -17,3 +17,7 @@ https://piro-develop.github.io/daytrade-performance-app/
 確認で問題が見つかった場合はGitHubへpushせず、問題点を報告してください。
 
 Firebaseの設定、Firestoreのデータ構造・セキュリティルール、保存済みデータは、事前確認なしに変更・削除しないでください。
+
+## 銘柄判断の正式仕様（2026-09-16）
+
+銘柄判断はスイング（数日〜3か月）と中長期（3か月以上）のみ。デイトレ評価・分足取得は再追加しない。週足を主、日足をEntry補助、月足は任意とし、分足不足を信頼度や保留に反映しない。詳細は `investment/investment_app_spec/15_FINAL_DESIGN.md` 冒頭の正式更新を優先する。既存の運用成績管理のデイトレ取引は変更対象外。

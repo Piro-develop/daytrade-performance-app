@@ -44,15 +44,15 @@ def payload():
     raw,meta=demo()
     return {"csv":base64.b64encode(raw).decode(),"symbol":meta["symbol"],"as_of":meta["as_of"],"metadata":meta}
 
-def test_atomic_three_horizons_restart_and_uid_isolation():
+def test_atomic_two_horizons_restart_and_uid_isolation():
     db=FakeFirestore()
     app=create_app(identity=TestIdentity(),store_factory=lambda uid,token:FirestoreHistory("daytrade-performance-app",uid,token,db))
     data=payload();data["uid"]="bob"
     status,out=call(app,"/api/judgment/analyze","POST","alice",data)
-    assert status==200 and set(out["results"])=={"daytrade","swing","midlong"}
+    assert status==200 and set(out["results"])=={"swing","midlong"}
     assert db.commits==1
     fresh=store(db)
-    assert len(fresh.list_runs())==3
+    assert len(fresh.list_runs())==2
     run=out["results"]["swing"]["run_id"]
     assert fresh.get(run)["run_id"]==run
     assert call(app,"/api/judgment/runs/"+run,token="bob")[0]==400

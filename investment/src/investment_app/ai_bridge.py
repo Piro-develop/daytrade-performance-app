@@ -4,7 +4,7 @@ import re
 from .horizons import all_cards
 from .models import InputError, digest
 
-CONTEXT_PREFIXES=("SC-","MC-","DC-")
+CONTEXT_PREFIXES=("SC-","MC-")
 def export_request(symbol,as_of,evidence,selected_ids):
     if not selected_ids or any(r not in evidence for r in selected_ids):
         raise InputError("公開・分析用として確認したEvidenceだけ選択してください。")
