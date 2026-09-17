@@ -45,6 +45,9 @@ def macro_chain(bundle: Bundle) -> dict:
 
 def investment_items(bundle: Bundle, technical: dict, cfg: dict) -> dict:
     items = {k:v for k,v in checked_manual(bundle).items() if not k.startswith("SE-")}
+    from .automatic_assessment import technical_assessments
+    for code,item in technical_assessments(bundle,technical,cfg,"swing").items():
+        items.setdefault(code,item)
     tid = technical["technical_evidence_id"]
     def computed(code, score, reason):
         items[code]={"score":score,"reason":reason,"counter_reason":"数値は比較補助。材料・反証は別のカードとPreflightで確認",

@@ -24,6 +24,7 @@ def test_one_source_failure_does_not_discard_daily(monkeypatch):
         return data,"https://example.invalid/prices","hash"
     monkeypatch.setattr(automatic,"chart",fetch)
     monkeypatch.setattr(automatic.PublicContextProvider,"fetch",lambda *a:(_ for _ in ()).throw(InputError("internal XML error")))
+    monkeypatch.setattr(automatic.PublicFactsProvider,"fetch",lambda *a:{"facts":{},"evidence":[],"evidence_quality":{},"notices":[]})
     result=automatic.acquire("7203")
     assert result["csv"] and len(result["notices"])==1
     assert "internal" not in str(result["notices"])
@@ -81,6 +82,7 @@ def test_fallback_source_and_observation_time_survive_to_evidence(monkeypatch):
     monkeypatch.setattr(automatic,"company_reference",lambda:([{"code":"4461","name":"第一工業製薬"}],"hash",now.isoformat()))
     monkeypatch.setattr(automatic,"chart",fetch)
     monkeypatch.setattr(automatic.PublicContextProvider,"fetch",lambda *a:{"evidence":[]})
+    monkeypatch.setattr(automatic.PublicFactsProvider,"fetch",lambda *a:{"facts":{},"evidence":[],"evidence_quality":{},"notices":[]})
     result=automatic.acquire("4461")
     assert result["csv"] and not any("intraday" in k for k in result["metadata"])
     for ev in result["metadata"]["evidence"]:

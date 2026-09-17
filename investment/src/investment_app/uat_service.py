@@ -36,6 +36,13 @@ def run_all(bundle,history,policy="unspecified",entry=None):
     if bundle.metadata.get("automatic"):
         for result,source,c in pending:
             result.metadata["automatic"]=copy.deepcopy(bundle.metadata["automatic"])
+            from .automatic_assessment import missing_reason
+            first=next(iter(result.scores.values()))
+            gaps={code:{"required_evidence":all_cards()[code]["required_evidence"],"reason":missing_reason(code,bundle.metadata.get("public_facts",{}))} for code in first.missing}
+            result.metadata["automatic"]["card_gaps"]=gaps
+            result.metadata["automatic"]["missing"]=[code+" "+all_cards()[code]["label"]+"："+v["reason"] for code,v in gaps.items()]
+            result.metadata["automatic"]["missing"] += [f.reason for f in result.findings if f.code.startswith("unchecked_")]
+
             result.metadata["source_mode"]="automatic_public"
             result.approval_hash=digest({k:v for k,v in plain(result).items() if k!="approval_hash"})
             results[result.metadata["horizon"]]=plain(result)

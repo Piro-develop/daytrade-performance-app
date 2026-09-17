@@ -26,7 +26,14 @@ for code in ('4461','7203'):
             assert all(k in p for k in ('target2','alert','stop2'))
             if p['target2'] is not None: assert Decimal(str(p['target2']))>=target
             if p['stop2'] is not None: assert Decimal(str(p['stop2']))<stop
-        print(json.dumps({'symbol':code,'horizon':horizon,'daily':len(r['technical']['daily']),
+        first=next(iter(r['scores'].values()))
+        evaluated=[k for k,v in first['items'].items() if v.get('score') is not None]
+        if code=='4461':
+            assert 'unchecked_liquidity' not in {f['code'] for f in r['findings']}
+            assert ('SW-E4' if horizon=='swing' else 'ML-I') in evaluated
+            assert any(x['present'] and x['S']>0 and x['F']>0 for x in r['confidence']['items'])
+        print(json.dumps({'symbol':code,'horizon':horizon,'evaluated':evaluated,'missing':first['missing'],
+            'preflight':[f['code'] for f in r['findings']],'daily':len(r['technical']['daily']),
             'weekly':r['technical']['weekly_count'],'confidence':r['confidence']['value'],
             'scores':{k:{s:v[s] for s in ('investment','entry')} for k,v in r['scores'].items()},
             'plans':[{k:p[k] for k in ('entry','target1','target2','alert','stop1','stop2','rr')} for p in r['plans']],

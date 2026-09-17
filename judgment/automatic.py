@@ -11,6 +11,7 @@ import requests
 from investment_app.models import InputError,Evidence,plain,digest,JST
 from investment_app.public_data import PublicContextProvider
 from .price_sources import chart as _chart, normalize_chart, download
+from .public_facts import PublicFactsProvider
 
 JPX_LIST="https://www.jpx.co.jp/markets/statistics-equities/misc/tvdivq0000001vg2-att/data_j.xlsx"
 JPX_TICKS="https://www.jpx.co.jp/equities/trading/domestic/07.html"
@@ -74,15 +75,16 @@ def acquire(query,now=None):
         stocks=json.loads((Path(__file__).resolve().parents[1]/"stocks.json").read_text(encoding="utf-8"))["securities"]
         notices.append("業種と呼値区分の最新情報を取得できませんでした。")
     stock=resolve(query,stocks);symbol=stock["code"]
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    with ThreadPoolExecutor(max_workers=3) as pool:
         jobs={key:pool.submit(fn) for key,fn in {
             "daily":lambda:chart(symbol,"1d"),
-            "macro":lambda:PublicContextProvider().fetch("ecb")}.items()}
+            "macro":lambda:PublicContextProvider().fetch("ecb"),
+            "facts":lambda:PublicFactsProvider().fetch(symbol,now or datetime.now(timezone.utc))}.items()}
         received={}
         for key,job in jobs.items():
             try:received[key]=job.result()
             except (requests.RequestException,InputError,ValueError,KeyError,TypeError,IndexError):
-                notices.append({"daily":"日足株価","macro":"為替参考値"}[key]+"を自動取得できませんでした。")
+                notices.append({"daily":"日足株価","macro":"為替参考値","facts":"企業公開情報"}[key]+"を自動取得できませんでした。")
     asof=now or datetime.now(timezone.utc);stamp=asof.isoformat()
     meta={"symbol":symbol,"name":stock["name"],"as_of":stamp,"evidence":[],"assessments":[],
           "macro":{"sector":stock.get("sector","")},"automatic":{"notices":notices,"assessment_provider":"unconfigured"},
@@ -95,6 +97,7 @@ def acquire(query,now=None):
         except (ValueError,KeyError,TypeError):
             notices.append("日足の確定データが不足しています。");continue
         eid="public-"+key+"-"+hash_value[:16]
+        meta["automatic"]["price_evidence_id"]=eid
         meta["evidence"].append(evidence(eid,data.get("meta",{}).get("source","Yahoo Finance 公開株価"),url,stamp,
             (data.get("meta",{}).get("source_note") or "Yahoo分割調整済み価格。配当調整終値をOHLCへ混在させない。")+
             " 確定日足。"+f" {len(rows)}本",hash_value,observed=rows[-1]["timestamp"],published=stamp))
@@ -124,5 +127,11 @@ def acquire(query,now=None):
                 "2027年3月改定前の呼値表。適用区分の根拠："+eid+"。価格水準別に丸める。"))
             meta.update(tick_size=tick,tick_evidence_id=tid,tick_schedule=table)
     if "macro" in received:meta["evidence"].extend(received["macro"]["evidence"])
+    if "facts" in received:
+        facts=received["facts"]
+        meta["public_facts"]=facts["facts"]
+        meta["evidence"].extend(facts["evidence"])
+        meta["evidence_quality"]=facts["evidence_quality"]
+        notices.extend(facts["notices"])
     meta["automatic"]["notices"]=notices
     return output

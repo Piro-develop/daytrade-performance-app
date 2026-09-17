@@ -25,7 +25,8 @@ def decode(value,maximum=10_000_000):
     return result
 
 class JudgmentService:
-    def __init__(self,directory=None,store=None):
+    def __init__(self,directory=None,store=None,assessment_provider=None):
+        self.assessment_provider=assessment_provider
         self.directory=Path(directory).resolve() if directory is not None else None
         self.store=store
     def folder(self,uid):
@@ -102,10 +103,12 @@ class JudgmentService:
             return {"results":{},"recommended":[],"status":"評価保留","symbol":acquired["symbol"],"name":acquired["name"],
                     "missing":["確定日足の株価・出来高"]+missing,"notices":acquired["notices"],"saved":False}
         bundle=bundle_from_input(raw,meta,acquired["symbol"],meta["as_of"])
-        # Keep qualitative assessment behind the existing AssessmentProvider contract.
-        # Missing data never becomes an anchor, a neutral score or a completed Preflight review.
+        from investment_app.automatic_assessment import prepare_automatic, apply_qualitative
+        prepare_automatic(bundle)
+        apply_qualitative(bundle,self.assessment_provider)
         price=entry or meta.get("current_quote",{}).get("price")
         results=run_all(bundle,self.history(uid),policy,str(price) if price else None)
+        missing=list(dict.fromkeys(x for r in results.values() for x in r["metadata"]["automatic"]["missing"]))
         return {"results":results,"missing":missing,"notices":acquired["notices"],"saved":True}
 
     def list_runs(self,uid):

@@ -57,6 +57,9 @@ def horizon_technical(bundle,cfg,horizon):
 def score_horizon(bundle,tech,plan,cfg,horizon):
     h=settings()[horizon];cards=horizon_cards(horizon)
     items=checked_manual(bundle,cards)
+    from .automatic_assessment import technical_assessments
+    for code,item in technical_assessments(bundle,tech,cfg,horizon,plan).items():
+        items.setdefault(code,item)
     def put(code,value,reason,refs):
         items[code]={"score":value,"reason":reason,"counter_reason":"主要な反証・価格構造を別途確認","evidence_ids":list(refs),
                      "evaluator":"program","rule_version":"cards-1.0.0","purpose":cards[code]["label"]}
