@@ -3,18 +3,26 @@ from pathlib import Path
 import json,sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'investment/src'))
-from judgment.service import JudgmentService
+from judgment.automatic import acquire
+from app_server import create_app
+from unittest.mock import patch
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'investment/tests'))
+from test_firestore_judgment import FakeFirestore, store
+from test_production_judgment import call, TestIdentity
 from decimal import Decimal
 
-class MemoryStore:
-    uid='verification'
-    def save_group(self,pending):self.pending=pending
-
 for code in ('4461','7203'):
-    memory=MemoryStore();out=JudgmentService(store=memory).automatic('verification',{'symbol':code})
+    acquired=acquire(code)
+    db=FakeFirestore()
+    app=create_app(identity=TestIdentity(),store_factory=lambda uid,token:store(db,uid))
+    with patch('judgment.automatic.acquire',return_value=acquired):
+        status,out=call(app,'/api/judgment/automatic','POST','alice',{'symbol':code})
+    assert status==200 and db.commits==1
     assert out['saved'] and set(out['results'])=={'swing','midlong'}
     assert not any('5分' in x or 'デイトレ' in x for x in out['missing'])
     for horizon,r in out['results'].items():
+        saved=store(db).get(r['run_id'])
+        assert all(saved[k]==v for k,v in r.items() if k!='presentation')
         assert r['technical']['weekly_count']>=58
         assert 0<=r['confidence']['value']<=100
         assert all(not row['criterion_id'].startswith(('DT-','DE-','DC-')) for row in r['confidence']['items'])
@@ -33,8 +41,14 @@ for code in ('4461','7203'):
             assert ('SW-E4' if horizon=='swing' else 'ML-I') in evaluated
             assert any(x['present'] and x['S']>0 and x['F']>0 for x in r['confidence']['items'])
         print(json.dumps({'symbol':code,'horizon':horizon,'evaluated':evaluated,'missing':first['missing'],
-            'preflight':[f['code'] for f in r['findings']],'daily':len(r['technical']['daily']),
-            'weekly':r['technical']['weekly_count'],'confidence':r['confidence']['value'],
-            'scores':{k:{s:v[s] for s in ('investment','entry')} for k,v in r['scores'].items()},
+            'preflight':r['findings'],'daily':len(r['technical']['daily']),
+             'weekly':r['technical']['weekly_count'],'confidence':r['confidence']['value'],
+            'confidence_components':r['confidence']['components'],
+            'evidence_quality':[v for v in r['confidence']['items'] if v['present']],
+            'qualitative_provider':r['metadata']['automatic']['qualitative_provider'],
+            'earnings':acquired['metadata'].get('public_facts',{}).get('earnings',{}),
+            'score_gaps':r['metadata']['automatic']['card_gaps'],
+            'decisions':{k:{s:v[s] for s in ('label','status','wait_reasons')} for k,v in r['decisions'].items()},
+            'scores':{k:{s:v[s] for s in ('structured','context','investment','entry')} for k,v in r['scores'].items()},
             'plans':[{k:p[k] for k in ('entry','target1','target2','alert','stop1','stop2','rr')} for p in r['plans']],
             'missing_plan':not bool(r['plans'])},ensure_ascii=True),flush=True)

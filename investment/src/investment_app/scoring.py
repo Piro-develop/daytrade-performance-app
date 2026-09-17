@@ -79,6 +79,9 @@ def investment_items(bundle: Bundle, technical: dict, cfg: dict) -> dict:
                  f"確定週足の直近高値{highs[-2:]}、安値{lows[-2:]}を比較")
     else:
         computed("SW-D2",None,"週足の確定高安比較に必要なpivotが不足")
+    # P02: missing event evidence invalidates its cards, not unrelated components.
+    if not bundle.metadata.get("earnings_at"):
+        computed("SW-H",None,"次回決算予定が未確認のため、イベント合理性は未評価")
     if not macro_chain(bundle)["valid"]:
         computed("SW-F",None,"セクター→ドライバー→企業感応度→個別比較のEvidenceが不足")
         computed("SC-4",None,"支配関係の解釈に必要なマクロ経路が不足")
@@ -112,6 +115,8 @@ def entry_items(bundle: Bundle, tech: dict, plan: EntryPlan, cfg: dict, manual: 
     def set_score(code,score,reason):
         out[code]={"score":score,"reason":reason,"counter_reason":"価格構造は将来の約定を保証しない",
                    "evidence_ids":list(plan.evidence_ids),"evaluator":"program"}
+    if not bundle.metadata.get("earnings_at"):
+        set_score("SE-G",None,"次回決算予定が未確認のため、直近タイミングは未評価")
     upside=float((plan.target1-plan.entry)/plan.entry*100)
     set_score("SE-A",interpolate(upside,cfg["upside_knots"]),f"第1利確までの余地 {upside:.4f}%")
     set_score("SE-C",interpolate(plan.rr,cfg["rr_knots"]),f"第1利確・第1損切によるRR {plan.rr}")

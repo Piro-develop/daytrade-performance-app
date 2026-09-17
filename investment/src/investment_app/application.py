@@ -63,15 +63,6 @@ def analyze(bundle: Bundle, cfg: dict, specified_entry=None, earnings_policy="un
     all_scores,decisions={},{}
     for plan in plans or [None]:
         scores=score(bundle,technical,plan,cfg)
-        if earnings["scheduled_at"] is None:
-            scores.entry=None
-            scores.entry_status=EvaluationStatus.PROVISIONAL
-            if "SE-G" not in scores.missing:
-                scores.missing.append("SE-G")
-            scores.investment=None
-            scores.status=EvaluationStatus.PROVISIONAL
-            if "SW-H" not in scores.missing:
-                scores.missing.append("SW-H")
         if any(x.severity==Severity.CRITICAL and x.scope in {"all","investment"} for x in findings):
             scores.structured=scores.context=scores.investment=None
             scores.status=EvaluationStatus.UNAVAILABLE

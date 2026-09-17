@@ -145,6 +145,11 @@ export function createJudgment(root,getUser,getSecurities) {
     if(!keys.includes(scenario)) scenario=keys.find(k=>k==="現値:avoid")||keys[0];
     const d=r.decisions[scenario]||{},kind=scenario.split(":")[0],s=r.scores[kind]||Object.values(r.scores)[0]||{};
     const p=r.plans.find(p=>p.kind===kind)||{};
+    const planGaps=r.metadata.automatic?.card_gaps_by_plan?.[kind];
+    const missingDetails=planGaps ? Object.entries(planGaps).map(([id,gap])=>
+      id+" "+(catalog?.cards[id]?.label||id)+"："+gap.reason).concat((r.findings||[])
+        .filter(f=>f.code.startsWith("unchecked_")||f.code.endsWith("_missing")).map(f=>f.reason))
+      : r.metadata.automatic?.missing||[];
     const daily=r.technical.daily||[],price=daily.at(-1)?.close??r.technical.latest;
     const findings=[...(d.findings||r.findings||[])].sort((a,b)=>({Critical:0,Severe:1,Warning:2}[a.severity]??3)-({Critical:0,Severe:1,Warning:2}[b.severity]??3));
     const expired=p.expires_at && new Date(p.expires_at)<new Date();
@@ -183,7 +188,7 @@ export function createJudgment(root,getUser,getSecurities) {
       detail("今買う vs 待つ・撤退条件",'<div class="j-grid"><div><h3>今買う根拠</h3>'+list(d.buy_reasons)+'</div><div><h3>待つ根拠</h3>'+list(d.wait_reasons)+'</div></div><h3>投資前提が崩れた場合</h3>'+list(r.metadata.exit_conditions)+'<p>価格構造の無効化：'+esc(text(p.invalidation))+'</p><h3>支配的材料による補正</h3>'+list(d.overrides)),
       detail("独立した事前確認・Critical / Severe / Warning",findings.map(f=>'<div class="j-finding"><b>'+esc(f.severity+" · "+f.code)+'</b><p>'+esc(f.reason)+'</p><small>対応：'+esc(f.resolution||"根拠と条件を再確認")+' / Evidence: '+esc((f.evidence_ids||[]).join(", "))+'</small></div>').join("")||"<p>警告なし</p>"),
       d.approval_required?detail("重大警告を確認して記録",'<p>対象の条件判断：'+esc(d.candidate||d.label||d.status)+'</p><p>承認は対象分析と価格プランだけに有効です。注文は実行しません。</p><p id="j-approval-status"></p>'+(d.approval_eligible&&!r.metadata.is_demo&&!expired?check("approval-confirm","上の警告・残存リスク・撤退条件を確認した")+'<div class="j-actions"><button type="button" class="secondary-button" data-approval="approved">条件を承認して記録</button><button type="button" class="secondary-button" data-approval="rejected">拒否を記録</button></div>':"<p>現在の条件では承認できません。</p>")):"",
-      detail("不足データ",list(r.metadata.automatic?.missing||[])+list((s.missing||[]).map(id=>catalog?.cards[id]?.label||id))),
+      detail("不足データ",list(missingDetails)+list((s.missing||[]).map(id=>catalog?.cards[id]?.label||id))),
       detail("判断材料・採点の根拠",'<p>構造化評価 '+num(s.structured)+' × 70% ＋ 定性コンテキスト '+num(s.context)+' × 30%</p><p>投資妙味：'+esc(s.status)+' ／ Entry品質：'+esc(s.entry_status)+'</p>'+Object.entries(s.items||{}).map(([id,row])=>'<div class="j-evidence"><b>'+esc(catalog?.cards[id]?.label||id)+' — '+num(row.score)+'</b><p>'+esc(row.reason)+'</p><p class="j-muted">反証：'+esc(row.counter_reason)+'</p><small>Evidence: '+esc((row.evidence_ids||[]).join(", "))+'</small></div>').join("")+'<h3>不足項目</h3>'+list(s.missing)),
       ...[
         ["業績・将来成長",["SW-A","ML-A","ML-B","ML-D","ML-F"]],

@@ -107,8 +107,8 @@ def test_google_validation_required_for_plausible_jwt(monkeypatch):
 def test_canonical_spec_config_and_engines_unchanged():
     manifest=json.loads((ROOT/"docs/INTEGRATION_SOURCE_HASHES.json").read_text(encoding="utf-8"))
     for relative,expected in manifest["files"].items():
-        # Storage/ticks, two horizons, and the explicit automatic-card hook have focused regression tests.
-        if Path(relative.replace(chr(92),"/")).name in {"storage.py","uat_service.py","scoring.py","entry_exit.py","horizons.py","horizons.json","ai_bridge.py","uat_ui.py","15_FINAL_DESIGN.md"}: continue
+        # Storage/ticks, two horizons, automatic cards and P02 event scope have focused regressions.
+        if Path(relative.replace(chr(92),"/")).name in {"storage.py","uat_service.py","application.py","scoring.py","entry_exit.py","horizons.py","horizons.json","ai_bridge.py","uat_ui.py","15_FINAL_DESIGN.md"}: continue
         raw=(ROOT/relative.replace(chr(92),"/")).read_bytes()
         # Git checkout may translate CRLF/LF; only line endings may differ from the original.
         lf=raw.replace(b"\r\n",b"\n")

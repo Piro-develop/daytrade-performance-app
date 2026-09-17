@@ -51,6 +51,7 @@ def test_automatic_engine_firestore_roundtrip_without_fake_scores(monkeypatch):
     response["csv"]=None
     held=service.automatic("alice",{"symbol":"7203"})
     assert held["status"]=="評価保留" and not held["saved"] and db.docs==before
+    assert held["missing"]==["確定日足の株価・出来高"]
 
 def test_price_level_ticks_keep_rr_and_stop_first():
     cfg=load_config()

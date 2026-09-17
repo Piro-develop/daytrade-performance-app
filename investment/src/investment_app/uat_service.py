@@ -37,11 +37,23 @@ def run_all(bundle,history,policy="unspecified",entry=None):
         for result,source,c in pending:
             result.metadata["automatic"]=copy.deepcopy(bundle.metadata["automatic"])
             from .automatic_assessment import missing_reason
-            first=next(iter(result.scores.values()))
-            gaps={code:{"required_evidence":all_cards()[code]["required_evidence"],"reason":missing_reason(code,bundle.metadata.get("public_facts",{}))} for code in first.missing}
+            cards=all_cards()
+            by_plan={}
+            for kind,score in result.scores.items():
+                codes=list(score.missing)
+                if "ME-E" in codes and score.items.get("ME-E-STRESS",{}).get("score") is None:
+                    codes.append("ME-E-STRESS")
+                by_plan[kind]={code:{"required_evidence":cards[code]["required_evidence"],
+                    "reason":score.items.get(code,{}).get("reason") or missing_reason(code,bundle.metadata.get("public_facts",{}))}
+                    for code in codes}
+            # Current-price gaps remain compatible; alternative plans retain their own gaps.
+            selected="現値" if "現値" in by_plan else next(iter(by_plan))
+            gaps=by_plan[selected]
             result.metadata["automatic"]["card_gaps"]=gaps
-            result.metadata["automatic"]["missing"]=[code+" "+all_cards()[code]["label"]+"："+v["reason"] for code,v in gaps.items()]
-            result.metadata["automatic"]["missing"] += [f.reason for f in result.findings if f.code.startswith("unchecked_")]
+            result.metadata["automatic"]["card_gaps_by_plan"]=by_plan
+            result.metadata["automatic"]["missing"]=[code+" "+cards[code]["label"]+"："+v["reason"] for code,v in gaps.items()]
+            result.metadata["automatic"]["missing"] += [f.reason for f in result.findings
+                if f.code.startswith("unchecked_") or f.code.endswith("_missing")]
 
             result.metadata["source_mode"]="automatic_public"
             result.approval_hash=digest({k:v for k,v in plain(result).items() if k!="approval_hash"})

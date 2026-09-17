@@ -93,11 +93,9 @@ class JudgmentService:
                 "source_name":"利用者の補完画像","as_of":meta["as_of"],"observed_at":supplement.get("image_observed",""),
                 "published_at":meta["as_of"],"summary":notes or "利用者が目視確認した画像。数値の自動抽出・採点には未使用。"})
             meta["evidence"].append(image)
-        missing=["最新の公式決算・会社計画と将来業績の根拠","カタリスト・市場期待と織り込みの確認",
-                 "最新の信用需給・同業比較","次回決算日と重要イベント",
-                 "重大悪材料・投資前提・流動性の独立確認","企業感応度を含むマクロ評価","根拠に基づく定性コンテキスト評価"]
+        missing=[]
         if not meta.get("tick_size"):missing.append("最新の呼値区分")
-        meta["automatic"].update(missing=missing,current_quote=meta.get("current_quote"),sector=meta.get("macro",{}).get("sector"),
+        meta["automatic"].update(current_quote=meta.get("current_quote"),sector=meta.get("macro",{}).get("sector"),
                                   entry_source="user" if entry else "public_quote",source_mode="automatic_public")
         if not raw:
             return {"results":{},"recommended":[],"status":"評価保留","symbol":acquired["symbol"],"name":acquired["name"],

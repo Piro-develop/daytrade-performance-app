@@ -65,3 +65,25 @@ def test_financial_table_preserves_periods_units_and_revision_comparison():
     assert revision_table(revision,f['forecast'])['previous'][1]==11000
     assert financial_table([text.replace('2026年3月期第1四半期','2026年3月期第2四半期')])=={}
     assert revision_table(revision.replace('12,500','12,600'),f['forecast'])=={}
+
+
+def test_missing_event_invalidates_only_event_cards_and_saved_gaps():
+    raw,meta=demo();meta['automatic']={'missing':['obsolete fixed message']}
+    before=run_all(bundle_from_input(raw,meta,meta['symbol'],meta['as_of']),Store())
+    meta.pop('earnings_at')
+    after=run_all(bundle_from_input(raw,meta,meta['symbol'],meta['as_of']),Store())
+    for horizon,event_cards in (('swing',{'SW-H','SE-G'}),('midlong',{'ME-G'})):
+        r=after[horizon];score=r['scores']['現値'];old=before[horizon]['scores']['現値']
+        for code in event_cards:
+            assert score['items'][code]['score'] is None and code in score['missing']
+        for code,item in old['items'].items():
+            if code not in event_cards: assert score['items'][code]==item
+        assert score['context']==old['context']
+        assert score['entry'] is None
+        if horizon=='swing': assert score['investment'] is None and score['structured'] is None
+        else: assert score['investment']==old['investment']
+        auto=r['metadata']['automatic']
+        assert 'obsolete fixed message' not in auto['missing']
+        assert set(auto['card_gaps'])==set(score['missing'])
+        assert set(auto['card_gaps_by_plan'])==set(r['scores'])
+        assert all(d['label'] not in ('買い','強気買い') for d in r['decisions'].values())
