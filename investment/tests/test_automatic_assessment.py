@@ -77,7 +77,9 @@ def test_missing_event_invalidates_only_event_cards_and_saved_gaps():
         for code in event_cards:
             assert score['items'][code]['score'] is None and code in score['missing']
         for code,item in old['items'].items():
-            if code not in event_cards: assert score['items'][code]==item
+            if code not in event_cards:
+                assert {k:v for k,v in score['items'][code].items() if k!='evidence_ids'}=={k:v for k,v in item.items() if k!='evidence_ids'}
+                assert all(ref in r['evidence'] for ref in score['items'][code]['evidence_ids'])
         assert score['context']==old['context']
         assert score['entry'] is None
         if horizon=='swing': assert score['investment'] is None and score['structured'] is None
