@@ -47,6 +47,10 @@ def prepare_automatic(bundle):
                 put('SW-A3',4,refs,'同一連結範囲・前年同期比でEPSまたは営業利益率が悪化。','赤字・一過性要因・通期予想を別途確認。')
             elif (cur['eps']>prev['eps'] and cur['operating_margin']>prev['operating_margin'] and prev.get('operating_yoy') is not None and prev.get('sales_yoy') is not None and prev['operating_yoy']>prev['sales_yoy'] and prev.get('net_yoy',-1)>0):
                 put('SW-A3',8,refs,f"EPS {prev['eps']}→{cur['eps']}、営業利益率 {prev['operating_margin']:.2f}%→{cur['operating_margin']:.2f}%。前年の比較期も増益・利益率改善で継続改善を確認。",'期中の一時的需要や製品構成の影響が持続する保証はない。')
+        if all(cur.get(k) is not None and prev.get(k) is not None for k in ('sales','operating','operating_margin')) and cur['sales']>prev['sales']>0 and cur['operating_margin']>prev['operating_margin']>0:
+            sales_effect=(cur['sales']-prev['sales'])*prev['operating_margin']/100
+            margin_effect=cur['sales']*(cur['operating_margin']-prev['operating_margin'])/100
+            put('ML-D',8,refs,f'前年同期比の営業増益を分解：売上高増の寄与{sales_effect:.1f}百万円、利益率改善の寄与{margin_effect:.1f}百万円。率の改善が利益へ接続。','算術分解であり数量・単価・構成の因果を分離したものではない。一時要因と持続性は別途確認。')
         if forecast and rev and rev.get('period')==forecast['period']:
             changes=[b-a for a,b in zip(rev['previous'],rev['current'])]
             if all(x>0 for x in changes) and cur['operating_yoy'] is not None and cur['operating_yoy']>0 and forecast.get('operating_yoy') is not None and forecast['operating_yoy']>0:
@@ -81,6 +85,8 @@ def technical_assessments(bundle, tech, cfg, horizon, plan=None):
         return (8 if a>b else 4 if a<b else 6),f'上昇足平均出来高={a:.0f}、下落足平均出来高={b:.0f}（直近{window}本、同値足は方向比較外）'
     daily,weekly=tech['daily'],tech['weekly']
     if horizon=='swing':
+        relative=relative_strength(bundle,tech,cfg)
+        if relative: put('SW-D3',**relative)
         for code,frame in (('SW-D4',weekly),('SW-E1',daily)):
             result=participation(frame,cfg['comparison_days'])
             if result: put(code,*result)
@@ -145,3 +151,28 @@ def apply_qualitative(bundle, provider):
     if any(r['criterion_id'] in existing for r in checked): raise InputError('定性カードが重複しています。')
     bundle.metadata.setdefault('assessments',[]).extend(checked)
     bundle.metadata['automatic']['qualitative_provider']='validated:ai_bridge'
+
+
+def relative_strength(bundle, tech, cfg):
+    import pandas as pd
+    from .technical import weekly_bars
+    bench=bundle.metadata.get('public_facts',{}).get('benchmark',{})
+    bars=bench.get('bars',[])
+    if not bars or {r['adjustment_basis'] for r in bars}!={r['adjustment_basis'] for r in bundle.bars}: return None
+    frame=pd.DataFrame(bars);frame.index=pd.to_datetime(frame.pop('timestamp'),utc=True).dt.tz_convert(tech['weekly'].index.tz)
+    bw=weekly_bars(frame[['open','high','low','close','volume']],bundle.as_of,bundle.metadata.get('calendar',[]))
+    sw=tech['weekly'];values=[]
+    if len(sw)<16: return None
+    for offset in (1,2,3):
+        end=sw.index[-offset];row=[]
+        for window in (4,13):
+            start=sw.index[-offset-window]
+            if start not in bw.index or end not in bw.index: return None
+            row.append(float(100*((sw.loc[end,'close']/sw.loc[start,'close']-1)-(bw.loc[end,'close']/bw.loc[start,'close']-1))))
+        values.append(row)
+    current=values[0];positive=all(x>0 for x in current);negative=all(x<0 for x in current)
+    persistent=all(x>0 for row in values for x in row)
+    worsening=negative and all(a<b for a,b in zip(values[0],values[1]))
+    improving=all(a>b>c for a,b,c in zip(*values))
+    value=10 if persistent and improving and tech['weekly_trend']=='上昇' else 1 if worsening else 8 if positive else 4 if negative else 6
+    return dict(value=value,reason=f"{bench['purpose']}：直近から3観測点の4週/13週差（%pt）={values}。同じ調整基準・開始日・終了日で比較。",counter='ETFの分配金・追随誤差は残る。企業価値・同業優位の証明には流用しない。',sources=[tech['technical_evidence_id']]+bench['evidence_ids'])

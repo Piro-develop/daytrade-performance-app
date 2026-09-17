@@ -6,7 +6,7 @@ from io import BytesIO
 import json, re, unicodedata
 from urllib.parse import urlsplit
 import requests
-from .price_sources import download, JST
+from .price_sources import download, normalize_chart, JST
 
 HOST = 'https://finance.yahoo.co.jp/quote/'
 PDF_HOST = 'finance-frontend-pc-dist.west.edge.storage-yahoo.jp'
@@ -116,7 +116,7 @@ class PublicFactsProvider:
             digest=sha256(raw).hexdigest();eid='facts-'+kind+'-'+digest[:16]
             observed=observed or stamp
             evidence.append(dict(evidence_id=eid,source_name=source,source_uri=url,observed_at=observed,published_at=published or stamp,fetched_at=stamp,summary=summary,content_hash=digest,source_type='public',confidence=.8))
-            quality[eid]=dict(valid_until=(datetime.fromisoformat(observed)+timedelta(days=days)).isoformat(),source_quality='original_verified' if original else 'secondary_verified',independent_evidence_ids=[],unresolved_conflict=False)
+            quality[eid]=dict(valid_until=((asof if original else datetime.fromisoformat(observed))+timedelta(days=days)).isoformat(),source_quality='original_verified' if original else 'secondary_verified',independent_evidence_ids=[],unresolved_conflict=False)
             return eid
         quote='';listing=[]
         for page in ('', '/disclosure'):
@@ -173,7 +173,7 @@ class PublicFactsProvider:
             try:
                 raw=download(financial['url']);pages,text=pdf_text(raw,symbol);table=financial_table(pages)
                 if table:
-                    eid=add('financial','会社公表 決算短信（TDnet原文）',financial['url'],raw,json.dumps(table,ensure_ascii=False)+'\n'+text[:18000],published=financial['published_at'],original=True)
+                    eid=add('financial','会社公表 決算短信（TDnet原文）',financial['url'],raw,json.dumps(table,ensure_ascii=False)+'\n'+text[:18000],observed=financial['published_at'],published=financial['published_at'],original=True)
                     facts['financial']={**table,'evidence_ids':[eid],'published_at':financial['published_at'],'period':table['current']['period'],'latest_confirmed':(asof-datetime.fromisoformat(financial['published_at'])).days<=120}
                     # Explicit scope only: no unsupported "no bad news" statement.
                     facts['financial']['going_concern_no_issue']=bool(re.search(r'継続企業の前提に関する注記[)）\s]*該当事項はありません',text))
@@ -181,11 +181,22 @@ class PublicFactsProvider:
                     if revision:
                         rr=download(revision['url']);_,rt=pdf_text(rr,symbol);rev=revision_table(rt,table['forecast'])
                         if rev:
-                            rid=add('revision','会社公表 業績予想修正（TDnet原文）',revision['url'],rr,json.dumps(rev,ensure_ascii=False)+'\n'+rt[:12000],published=revision['published_at'],original=True)
+                            rid=add('revision','会社公表 業績予想修正（TDnet原文）',revision['url'],rr,json.dumps(rev,ensure_ascii=False)+'\n'+rt[:12000],observed=revision['published_at'],published=revision['published_at'],original=True)
                             facts['revision']={**rev,'evidence_ids':[rid]}
                         else:
                             facts['financial']['latest_confirmed']=False
                             quality[eid]['unresolved_conflict']=True
                             notices.append('業績修正と採用計画の数値を照合できないため財務評価を保留しています。')
             except (requests.RequestException, ValueError, KeyError, TypeError, ImportError): notices.append('公式決算の数値表を確実に確認できなかったため、該当カードを未評価にしています。')
+        # A market-wide comparison proxy, not a peer valuation or another trading target.
+        url='https://query1.finance.yahoo.com/v8/finance/chart/1306.T'
+        try:
+            params={'interval':'1d','range':'1y'};raw=download(url,params)
+            data=json.loads(raw)['chart']['result'][0];m=data['meta']
+            if not (m.get('symbol')=='1306.T' and m.get('currency')=='JPY' and m.get('instrumentType')=='ETF' and m.get('exchangeName')=='JPX'): raise ValueError('benchmark_identity')
+            rows,_=normalize_chart(data,'1306','1d',asof)
+            uri=requests.Request('GET',url,params=params).prepare().url
+            eid=add('benchmark','Yahoo Finance TOPIX連動ETF 1306',uri,raw,'市場全体に対する相対強度用。TOPIX連動ETFを価格リターン比較の代理に使用。指数そのもの・同業比較ではない。分配金・追随誤差を含む制約。商品定義：https://nextfunds.jp/lineup/1306/',observed=rows[-1]['timestamp'],days=3)
+            facts['benchmark']={'symbol':'1306','bars':rows,'evidence_ids':[eid],'purpose':'TOPIX連動ETFに対する4週・13週価格リターン差'}
+        except (requests.RequestException,ValueError,KeyError,TypeError,IndexError): notices.append('市場比較用の確定日足を取得できず、相対強度は未評価です。')
         return dict(facts=facts,evidence=evidence,evidence_quality=quality,notices=notices)

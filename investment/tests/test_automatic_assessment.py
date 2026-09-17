@@ -18,14 +18,17 @@ def test_public_facts_reach_cards_preflight_confidence_and_decision():
     # Controlled fixture, explicitly not real-company observations.
     fref='demo-financial';forecast={'period':'2027年3月期','sales':97000,'operating':12500,'ordinary':12600,'net':7700,'eps':725.67,'operating_yoy':23.7}
     financial=dict(latest_confirmed=True,period='2027年3月期第1四半期',evidence_ids=[fref],going_concern_no_issue=True,
-      current={'eps':293.7,'operating_margin':18.60,'operating_yoy':196.9},previous={'eps':102.81,'operating_margin':9.04,'operating_yoy':62.8,'sales_yoy':8.6,'net_yoy':61.7},forecast=forecast)
+      current={'eps':293.7,'operating_margin':18.60,'operating_yoy':196.9,'sales':27501,'operating':5117},previous={'eps':102.81,'operating_margin':9.04,'operating_yoy':62.8,'sales_yoy':8.6,'net_yoy':61.7,'sales':19046,'operating':1723},forecast=forecast)
     b=bundle_from_input(raw,meta,meta['symbol'],meta['as_of']);base=run_all(copy.deepcopy(b),Store())
     price='public-daily-fixture';market=b.evidence[b.metadata['market_evidence_id']]
     b.evidence[price]=replace(market,evidence_id=price,source_type='public',source_uri='https://example.invalid/verified-daily')
     b.metadata.update(automatic={'notices':[],'price_evidence_id':price},public_facts={'financial':financial,'revision':{'period':forecast['period'],'previous':[84000,11000,11000,6700,631.42],'current':[97000,12500,12600,7700,725.67],'evidence_ids':[fref]}})
     b.metadata['evidence_quality'][fref]={'valid_until':(time_value(b.as_of)+timedelta(days=1)).isoformat(),'source_quality':'original_verified','unresolved_conflict':False}
+    benchmark='public-daily-benchmark-fixture'
+    b.evidence[benchmark]=replace(b.evidence[price],evidence_id=benchmark,source_uri='https://example.invalid/benchmark')
+    b.metadata['public_facts']['benchmark']={'bars':[dict(row,open=100,high=101,low=99,close=100,volume=1000) for row in b.bars],'evidence_ids':[benchmark],'purpose':'架空比較系列'}
     prepare_automatic(b);apply_qualitative(b,None);out=run_all(b,Store())
-    assert {r['criterion_id'] for r in b.metadata['assessments']}=={'SW-A3','ML-A'}
+    assert {r['criterion_id'] for r in b.metadata['assessments']}=={'SW-A3','ML-A','ML-D'}
     for h,r in out.items():
         s=next(iter(r['scores'].values()));before=next(iter(base[h]['scores'].values()))
         assert len(s['missing'])<len(before['missing'])
@@ -37,6 +40,7 @@ def test_public_facts_reach_cards_preflight_confidence_and_decision():
         assert not any(v['label'] in ('買い','強気買い') for v in r['decisions'].values())
         assert r['metadata']['automatic']['card_gaps']
     sw=next(iter(out['swing']['scores'].values()))
+    assert sw['items']['SW-D3']['score'] in (1,4,6,8,10)
     assert sw['items']['SW-A3']['score']==8 and 'SW-A1' in sw['missing']
     assert next(x for x in out['swing']['confidence']['items'] if x['criterion_id']=='SW-A3')['S']==1
     ml=next(iter(out['midlong']['scores'].values()))
