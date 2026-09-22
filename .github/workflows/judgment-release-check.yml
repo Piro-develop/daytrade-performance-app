@@ -24,6 +24,7 @@ jobs:
         run: |
           python -m pytest investment/tests/test_automatic_judgment.py investment/tests/test_automatic_assessment.py investment/tests/test_price_sources.py investment/tests/test_two_horizons.py investment/tests/test_firestore_judgment.py investment/tests/test_production_judgment.py investment/tests/test_approval.py investment/tests/test_decision.py -q
           node --check judgment.mjs
+          node scripts/check-screening-copy.mjs
       - name: Check actual public prices for 4461 and 7203
         run: |
           python scripts/check-price-acquisition.py

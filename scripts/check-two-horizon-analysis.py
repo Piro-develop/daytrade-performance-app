@@ -36,7 +36,10 @@ for code in ('4461','7203'):
             if p['stop2'] is not None: assert Decimal(str(p['stop2']))<stop
         first=next(iter(r['scores'].values()))
         assert first['entry'] is not None and first['entry_coverage']>=.6
-        assert first['investment'] is not None if first['coverage']>=.6 and not any(f['severity']=='Critical' and f['scope'] in ('all','investment') for f in r['findings']) else first['investment'] is None
+        assert first['investment'] is not None and 0<first['coverage']<=1
+        assert r['metadata']['screening']['label'] in ('通過','要確認','非通過')
+        assert r['metadata']['screening']['chatgpt_checks']
+        assert not any('AI' in f['reason'] for f in r['findings'])
         assert all(f['severity']=='Warning' for f in r['findings'] if f['code'].startswith('unchecked_'))
         assert not any(c.startswith(('SC-','MC-')) for c in first['missing'])
         evaluated=[k for k,v in first['items'].items() if v.get('score') is not None]
@@ -44,7 +47,7 @@ for code in ('4461','7203'):
             assert 'unchecked_liquidity' not in {f['code'] for f in r['findings']}
             assert ('SW-E4' if horizon=='swing' else 'ML-I') in evaluated
             assert any(x['present'] and x['S']>0 and x['F']>0 for x in r['confidence']['items'])
-        print(json.dumps({'symbol':code,'horizon':horizon,'evaluated':evaluated,'missing':first['missing'],
+        print(json.dumps({'symbol':code,'horizon':horizon,'screening':r['metadata']['screening'],'evaluated':evaluated,'missing':first['missing'],
             'preflight':r['findings'],'daily':len(r['technical']['daily']),
              'weekly':r['technical']['weekly_count'],'confidence':r['confidence']['value'],
             'confidence_components':r['confidence']['components'],

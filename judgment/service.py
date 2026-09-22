@@ -98,12 +98,12 @@ class JudgmentService:
         meta["automatic"].update(current_quote=meta.get("current_quote"),sector=meta.get("macro",{}).get("sector"),
                                   entry_source="user" if entry else "public_quote",source_mode="automatic_public")
         if not raw:
-            return {"results":{},"recommended":[],"status":"評価保留","symbol":acquired["symbol"],"name":acquired["name"],
+            return {"results":{},"recommended":[],"status":"要確認","symbol":acquired["symbol"],"name":acquired["name"],
                     "missing":["確定日足の株価・出来高"]+missing,"notices":acquired["notices"],"saved":False}
         bundle=bundle_from_input(raw,meta,acquired["symbol"],meta["as_of"])
-        from investment_app.automatic_assessment import prepare_automatic, apply_qualitative
+        from investment_app.automatic_assessment import prepare_automatic
         prepare_automatic(bundle)
-        apply_qualitative(bundle,self.assessment_provider)
+        bundle.metadata["screening"]=True
         price=entry or meta.get("current_quote",{}).get("price")
         results=run_all(bundle,self.history(uid),policy,str(price) if price else None)
         missing=list(dict.fromkeys(x for r in results.values() for x in r["metadata"]["automatic"]["missing"]))

@@ -24,6 +24,67 @@ const download = (name,value) => {
   const a=document.createElement("a");a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 };
 
+
+const publicInvalidation=(plan,tech)=>{
+  if(!plan) return "価格戦略は未成立";
+  const b=(tech.bands||[]).find(b=>b.band_id===plan.support_id);
+  return (b?"支持帯 "+num(b.low)+"〜"+num(b.high):"採用支持帯")+"を割り、想定価格構造が否定された場合に再評価";
+};
+const chartLines=tech=>["weekly","daily"].flatMap(frame=>{
+  const rows=tech[frame]||[],last=rows.at(-1)||{},old=rows.at(-5)||{};
+  const unit=frame==="weekly"?"週":"日",periods=frame==="weekly"?[13,26,52]:[13,25,50,75];
+  return periods.map(n=>{
+    const key="ma"+n,v=last[key],delta=v!=null&&old[key]!=null?v-old[key]:null;
+    return n+unit+"線 "+num(v)+" / 4"+unit+"前比 "+num(delta)+" / 終値は"+(v==null||last.close==null?"比較不能":last.close>v?"上":last.close<v?"下":"同値");
+  }).concat(["直近確定"+unit+"足 高値 "+num(last.high)+" / 安値 "+num(last.low)+" / 出来高 "+num(last.volume)]);
+});
+
+// Explicit allowlist: no raw metadata, account data, Evidence IDs or developer JSON.
+export function buildChatGPTText(results, selectedHorizon="swing", kind="現値") {
+  const first=results[selectedHorizon]||Object.values(results)[0];
+  if(!first?.metadata?.screening) return "";
+  const lines=["# 日本株の一次分析",first.symbol+" "+first.name,"分析日時："+first.as_of,
+    "これは一次スクリーニングです。最終売買判断ではありません。"];
+  for(const [h,r] of Object.entries(results)) {
+    if(!r.metadata?.screening) continue;
+    const t=r.technical||{},screen=r.metadata.screening;
+    const sc=r.scores?.[kind]||r.scores?.["現値"]||Object.values(r.scores||{})[0]||{};
+    const p=(r.plans||[]).find(p=>p.kind===kind)||(r.plans||[]).find(p=>p.kind==="現値");
+    const d=(t.daily||[]).at(-1)||{},w=(t.weekly||[]).at(-1)||{};
+    const price=r.metadata.automatic?.current_quote?.price??d.close??t.latest;
+    lines.push("", "## "+names[h],"一次判定："+screen.label,"現在値（参考・遅延あり）："+num(price),
+      "株価観測日時："+(r.metadata.automatic?.current_quote?.observed_at||"日足終値を参照"),
+      "一次定量評価："+scoreText(sc.investment)+" / coverage "+num(100*(sc.coverage??0))+"%",
+      "Entry品質："+scoreText(sc.entry)+" / coverage "+num(100*(sc.entry_coverage??0))+"%",
+      "データ信頼度："+num(r.confidence?.value)+" / 100",
+      "週足："+(t.weekly_trend||"不明")+" / 日足："+(screen.daily_state||"不明"),
+      "週足MA："+[13,26,52].map(n=>n+"週 "+num(w["ma"+n])).join(" / "),
+      "日足MA："+[13,25,50,75].map(n=>n+"日 "+num(d["ma"+n])).join(" / "),
+      "出来高比："+num(t.volume_ratio));
+    for(const [code,item] of Object.entries(sc.items||{})) if(["SW-D4","SW-E1","SW-E2","SW-E4"].includes(code)&&item.score!=null) lines.push("出来高・需給："+item.reason);
+    lines.push(...chartLines(t));
+    for(const [name,filter] of [
+      ["主要支持帯",b=>price!=null&&Number(b.high)<Number(price)],
+      ["主要抵抗帯",b=>price!=null&&Number(b.low)>Number(price)]]) {
+      const bands=(t.bands||[]).filter(filter).sort((a,b)=>Math.abs(Number(a.low)-price)-Math.abs(Number(b.low)-price)).slice(0,3);
+      lines.push(name+"："+(bands.map(b=>num(b.low)+"〜"+num(b.high)).join(" / ")||"未確認"));
+    }
+    if(p) {
+      lines.push("価格条件："+p.kind+" / 有効期限："+p.expires_at);
+      for(const [label,key] of [["Entry候補","entry"],["第1利確","target1"],["最終利確","target2"],
+        ["Alert","alert"],["通常損切","stop1"],["最終損切","stop2"],["RR","rr"]]) lines.push(label+"："+num(p[key]));
+      lines.push("価格構造の無効化："+publicInvalidation(p,t));
+    } else lines.push("価格戦略：未成立");
+    lines.push("投資前提崩れ："+((r.metadata.exit_conditions||[]).join(" / ")||"追加調査で具体化が必要"));
+    const warnings=(r.findings||[]).map(f=>f.severity+"："+f.reason);
+    lines.push("確認事項："+(warnings.join(" / ")||"記録された警告なし"));
+  }
+  lines.push("", "## 基本業績・公開指標・信用需給",...(first.metadata.screening.facts||[]).map(x=>"- "+x),
+    "", "## ChatGPTで確認する項目",...Array.from(new Set(Object.values(results).flatMap(r=>r.metadata?.screening?.chatgpt_checks||[]))).map(x=>"- "+x),
+    "上記の不足情報を出典・日付付きで確認してください。通常損切と投資前提崩れによる撤退を分け、最後は人間がチャートと売買条件を確認します。");
+  return lines.join("\n");
+}
+
 export function createJudgment(root,getUser,getSecurities) {
   let mounted=false,catalog=null,metadata={},csv="",results={},recommended=[],horizon="swing",scenario="",apiBase="",busy=false,generation=0;
   let inputVersion=0,resultVersion=-1;
@@ -141,6 +202,7 @@ export function createJudgment(root,getUser,getSecurities) {
   }
   function renderResult() {
     const r=results[horizon];if(!r) return;
+    const screen=r.metadata.screening,quantLabel=screen?"一次定量評価":"投資妙味";
     const keys=Object.keys(r.decisions);
     if(!keys.includes(scenario)) scenario=keys.find(k=>k==="現値:avoid")||keys[0];
     const d=r.decisions[scenario]||{},kind=scenario.split(":")[0],s=r.scores[kind]||Object.values(r.scores)[0]||{};
@@ -154,13 +216,13 @@ export function createJudgment(root,getUser,getSecurities) {
     const findings=[...(d.findings||r.findings||[])].sort((a,b)=>({Critical:0,Severe:1,Warning:2}[a.severity]??3)-({Critical:0,Severe:1,Warning:2}[b.severity]??3));
     const expired=p.expires_at && new Date(p.expires_at)<new Date();
     const preferred=inputVersion===resultVersion?recommended.filter(h=>Object.values(results[h]?.presentation||{}).some(v=>v.can_recommend&&!v.expired)):[];
-    const recommendationText=preferred.length?preferred.map(h=>names[h]).join(" / "):Object.values(results).every(x=>Object.values(x.decisions||{}).every(d=>d.label==="見送り"))?"見送り":"未判定（必要情報が不足）";
+    const recommendationText=screen&&Object.values(results).every(x=>x.metadata?.screening?.label==="非通過")?"該当なし（非通過）":screen?(preferred.length?preferred.map(h=>names[h]).join(" / ")+"（追加調査候補）":Object.values(results).filter(x=>x.metadata?.screening?.label!=="非通過").map(x=>names[x.metadata.horizon]).join(" / ")+"（追加確認）") : preferred.length?preferred.map(h=>names[h]).join(" / "):Object.values(results).every(x=>Object.values(x.decisions||{}).every(d=>d.label==="見送り"))?"見送り":"未判定（必要情報が不足）";
     const view=r.presentation?.[scenario]||{};
     let label=view.label||d.label||d.status||"未評価";
-    if(findings.some(f=>f.severity==="Critical"))label="評価保留";
+    if(!screen&&findings.some(f=>f.severity==="Critical"))label="評価保留";
     if(inputVersion!==resultVersion)label+="（保存済みの分析）";
     else if(expired&&!label.includes("期限切れ"))label+="（期限切れ・履歴）";
-    const note=r.metadata.is_demo?"検証用の架空データ":expired?"価格プランの有効期限切れ":d.approval_required?"重大警告の確認が必要":d.status;
+    const note=screen?"詳しく調べる価値の一次判定です。買い判断ではありません。" : r.metadata.is_demo?"検証用の架空データ":expired?"価格プランの有効期限切れ":d.approval_required?"重大警告の確認が必要":d.status;
     const macro=obj(r.technical.macro);
     const horizonScore=h=>{const x=results[h];return x?.scores?.[scenario.split(":")[0]]||x?.scores?.["現値"]||Object.values(x?.scores||{})[0]||{};};
     const coverageText=(sc,key)=>sc[key]==null?"未記録":(100*sc[key]).toFixed(1)+"%";
@@ -173,9 +235,9 @@ export function createJudgment(root,getUser,getSecurities) {
       '<p id="j-recommendation" class="j-muted">推奨時間軸：'+esc(recommendationText)+'<br>表示中：'+esc(names[horizon]+" / "+kind)+'</p>',
       '<div class="j-verdict"><strong id="j-verdict-label">'+esc(label)+'</strong><span>'+esc(note)+'</span></div>',
       '<div class="j-metrics">'+[
-        ["スイング投資妙味",scoreSummary("swing","investment")],["スイングEntry品質",scoreSummary("swing","entry")],
-        ["中長期投資妙味",scoreSummary("midlong","investment")],["中長期Entry品質",scoreSummary("midlong","entry")],[expired||inputVersion!==resultVersion?"分析時の株価":"現在値（参考・遅延あり）",num(r.metadata.automatic?.current_quote?.price??price)],
-        [!d.label||label.startsWith("評価保留")?"Entry候補（未確定）":"推奨Entry",num(p.entry)],["第1利確",num(p.target1)],["最終利確",num(p.target2)],["Alert",num(p.alert)],
+        ["スイング"+quantLabel,scoreSummary("swing","investment")],["スイングEntry品質",scoreSummary("swing","entry")],
+        ["中長期"+quantLabel,scoreSummary("midlong","investment")],["中長期Entry品質",scoreSummary("midlong","entry")],[expired||inputVersion!==resultVersion?"分析時の株価":"現在値（参考・遅延あり）",num(r.metadata.automatic?.current_quote?.price??price)],
+        [screen?"Entry候補":!d.label||label.startsWith("評価保留")?"Entry候補（未確定）":"推奨Entry",num(p.entry)],["第1利確",num(p.target1)],["最終利確",num(p.target2)],["Alert",num(p.alert)],
         ["第1損切",num(p.stop1)],["最終損切",num(p.stop2)],["RR",num(p.rr)],["データ信頼度",num(r.confidence?.value)+" / 100"]
       ].map(([k,v])=>metric(k,v)).join("")+'</div>',
       '<p class="j-concern"><b>最大懸念</b> '+esc(findings[0]?.reason||d.wait_reasons?.[0]||"記録された懸念なし")+'</p>',
@@ -187,27 +249,35 @@ export function createJudgment(root,getUser,getSecurities) {
       '<p class="j-muted">分析日時：'+esc(r.as_of)+' ／ 価格プラン有効期限：'+esc(p.expires_at||"未成立")+'</p>',
       detail("2つの時間軸を比較",'<div class="j-horizons">'+Object.entries(results).map(([h,x])=>{
         const ds=x.decisions["現値:avoid"]||Object.values(x.decisions)[0],sc=x.scores["現値"]||Object.values(x.scores)[0]||{};
-        return '<div class="j-mini"><b>'+esc(names[h])+'</b><p>'+esc(x.presentation?.["現値:avoid"]?.label||ds?.label||ds?.status||"未評価")+'</p><p>投資妙味 '+num(sc.investment)+'</p><p>Entry品質 '+num(sc.entry)+'</p></div>';
+        return '<div class="j-mini"><b>'+esc(names[h])+'</b><p>'+esc(x.presentation?.["現値:avoid"]?.label||ds?.label||ds?.status||"未評価")+'</p><p>'+esc(x.metadata.screening?'一次定量評価':'投資妙味')+' '+num(sc.investment)+'</p><p>Entry品質 '+num(sc.entry)+'</p></div>';
       }).join("")+'</div><p class="j-muted">各時間軸は独立評価です。異なる時間軸の点数を単純に順位付けしません。</p>'),
-      detail("今買う vs 待つ・撤退条件",'<div class="j-grid"><div><h3>今買う根拠</h3>'+list(d.buy_reasons)+'</div><div><h3>待つ根拠</h3>'+list(d.wait_reasons)+'</div></div><h3>投資前提が崩れた場合</h3>'+list(r.metadata.exit_conditions)+'<p>価格構造の無効化：'+esc(text(p.invalidation))+'</p><h3>支配的材料による補正</h3>'+list(d.overrides)),
+      screen?detail("一次判定の理由・価格戦略・撤退条件",list(screen.reasons)+'<p>価格構造の無効化：'+esc(screen?publicInvalidation(p,r.technical):text(p.invalidation))+'</p><h3>投資前提の崩れ</h3>'+list(r.metadata.exit_conditions)+'<p>最終的な売買可否と事業上の撤退条件は追加調査・目視で確認してください。</p>') : detail("今買う vs 待つ・撤退条件",'<div class="j-grid"><div><h3>今買う根拠</h3>'+list(d.buy_reasons)+'</div><div><h3>待つ根拠</h3>'+list(d.wait_reasons)+'</div></div><h3>投資前提が崩れた場合</h3>'+list(r.metadata.exit_conditions)+'<p>価格構造の無効化：'+esc(screen?publicInvalidation(p,r.technical):text(p.invalidation))+'</p><h3>支配的材料による補正</h3>'+list(d.overrides)),
       detail("独立した事前確認・Critical / Severe / Warning",findings.map(f=>'<div class="j-finding"><b>'+esc(f.severity+" · "+f.code)+'</b><p>'+esc(f.reason)+'</p><small>対応：'+esc(f.resolution||"根拠と条件を再確認")+' / Evidence: '+esc((f.evidence_ids||[]).join(", "))+'</small></div>').join("")||"<p>警告なし</p>"),
       d.approval_required?detail("重大警告を確認して記録",'<p>対象の条件判断：'+esc(d.candidate||d.label||d.status)+'</p><p>承認は対象分析と価格プランだけに有効です。注文は実行しません。</p><p id="j-approval-status"></p>'+(d.approval_eligible&&!r.metadata.is_demo&&!expired?check("approval-confirm","上の警告・残存リスク・撤退条件を確認した")+'<div class="j-actions"><button type="button" class="secondary-button" data-approval="approved">条件を承認して記録</button><button type="button" class="secondary-button" data-approval="rejected">拒否を記録</button></div>':"<p>現在の条件では承認できません。</p>")):"",
       detail("不足データ",list(missingDetails)+list((s.missing||[]).map(id=>catalog?.cards[id]?.label||id))),
-      detail("判断材料・採点の根拠",(r.metadata.evaluation_policy==='coverage-v1'?'<p>評価済み構造化カードの加重平均 '+num(s.structured)+' / 投資妙味coverage '+coverageText(s,'coverage')+' / Entry coverage '+coverageText(s,'entry_coverage')+'</p><p>任意の定性補足 '+(s.context==null?'未利用（スコア計算には不要）':num(s.context))+'</p>':'<p>旧規則：構造化評価 '+num(s.structured)+' × 70% ＋ 定性コンテキスト '+num(s.context)+' × 30%</p>')+'<p>投資妙味：'+esc(s.status)+' ／ Entry品質：'+esc(s.entry_status)+'</p>'+Object.entries(s.items||{}).map(([id,row])=>'<div class="j-evidence"><b>'+esc(catalog?.cards[id]?.label||id)+' — '+num(row.score)+'</b><p>'+esc(row.reason)+'</p><p class="j-muted">反証：'+esc(row.counter_reason)+'</p><small>Evidence: '+esc((row.evidence_ids||[]).join(", "))+'</small></div>').join("")+'<h3>不足項目</h3>'+list(s.missing)),
-      ...[
+      detail("判断材料・採点の根拠",(screen?'<p>取得できた客観カードだけの加重平均。一次定量評価coverage '+coverageText(s,'coverage')+' / Entry coverage '+coverageText(s,'entry_coverage')+'。対象は週足・基本業績・出来高・相対強度・需給など、時間軸別に定めた機械評価項目です。最終投資妙味ではなく、旧スコアとは比較できません。</p>':r.metadata.evaluation_policy==='coverage-v1'?'<p>評価済み構造化カードの加重平均 '+num(s.structured)+' / 投資妙味coverage '+coverageText(s,'coverage')+' / Entry coverage '+coverageText(s,'entry_coverage')+'</p><p>任意の定性補足 '+(s.context==null?'未利用（スコア計算には不要）':num(s.context))+'</p>':'<p>旧規則：構造化評価 '+num(s.structured)+' × 70% ＋ 定性コンテキスト '+num(s.context)+' × 30%</p>')+'<p>'+quantLabel+'：'+esc(s.status)+' ／ Entry品質：'+esc(s.entry_status)+'</p>'+Object.entries(s.items||{}).map(([id,row])=>'<div class="j-evidence"><b>'+esc(catalog?.cards[id]?.label||id)+' — '+num(row.score)+'</b><p>'+esc(row.reason)+'</p><p class="j-muted">反証：'+esc(row.counter_reason)+'</p><small>Evidence: '+esc((row.evidence_ids||[]).join(", "))+'</small></div>').join("")+'<h3>不足項目</h3>'+list(s.missing)),
+      ...(screen?[]:[
         ["業績・将来成長",["SW-A","ML-A","ML-B","ML-D","ML-F"]],
         ["カタリスト",["SW-C","ML-C"]],["市場期待・織り込み",["SW-B","ML-E"]],
         ["出来高・信用需給",["SW-E","ML-J"]],["バリュエーション・競争優位",["SW-I","SW-G","ML-H","ML-C"]]
-      ].map(([title,prefixes])=>detail(title,list(Object.entries(s.items||{}).filter(([id])=>prefixes.some(k=>id.startsWith(k))).map(([id,row])=>(catalog?.cards[id]?.label||id)+"："+(row.score==null?"未評価":Number(row.score).toFixed(1))+" / "+(row.reason||"根拠不足"))))),
-      detail("週足・日足・出来高",'<p>スイング：数日〜3か月／中長期：3か月以上。週足を主、日足をEntryの補助として評価</p><div class="j-metrics">'+metric("週足の大局",text(r.technical.weekly_trend))+metric("確定週足",num(r.technical.weekly_count))+metric("RSI",num(r.technical.rsi))+metric("出来高比",num(r.technical.volume_ratio))+'</div><p>支持・抵抗帯の根拠</p>'+list((r.technical.bands||[]).map(x=>JSON.stringify(x)))),
-      detail("セクター・マクロ",'<ol>'+[
+      ]).map(([title,prefixes])=>detail(title,list(Object.entries(s.items||{}).filter(([id])=>prefixes.some(k=>id.startsWith(k))).map(([id,row])=>(catalog?.cards[id]?.label||id)+"："+(row.score==null?"未評価":Number(row.score).toFixed(1))+" / "+(row.reason||"根拠不足"))))),
+      detail("週足・日足・出来高",'<p>スイング：数日〜3か月／中長期：3か月以上。週足を主、日足をEntryの補助として評価</p><div class="j-metrics">'+metric("週足の大局",text(r.technical.weekly_trend))+metric("確定週足",num(r.technical.weekly_count))+metric("日足の状態",screen?.daily_state||"詳細を確認")+metric("RSI",num(r.technical.rsi))+metric("出来高比",num(r.technical.volume_ratio))+'</div>'+list(chartLines(r.technical))+'<p>支持・抵抗帯の根拠</p>'+list((r.technical.bands||[]).map(x=>screen?num(x.low)+'〜'+num(x.high)+' / 強度 '+num(x.strength):JSON.stringify(x)))),
+      screen?detail("基本業績・公開指標・信用需給",list(screen.facts)):detail("セクター・マクロ",'<ol>'+[
         ["セクター特定",macro.sector||r.metadata.automatic?.sector],["セクター地合い",macro.sector_condition],
         ["主要ドライバー",(macro.drivers||[]).map(x=>x.name||x).join("、")],
         ["企業の感応度",macro.company_sensitivity],["セクター要因と個別材料の強弱",macro.dominant_force]
       ].map(([k,v])=>'<li><b>'+esc(k)+'</b><p>'+esc(v||"不足")+'</p></li>').join("")+'</ol><p>個別材料：'+esc(macro.specific_factors||"不足")+'</p><p>根拠が揃っているか：'+(macro.valid?"確認済み":"不足")+'</p>'),
       detail("Evidence・データ信頼度・決算",'<p>'+esc(r.confidence?.note)+'</p><p>決算予定：'+esc(r.earnings?.scheduled_at||(r.earnings?.state==='none_within_30_days'?'今後30日以内に決算なしを確認':'不明（Warning）'))+'</p>'+Object.values(r.evidence||{}).map(e=>'<div class="j-evidence"><b>'+esc(e.evidence_id)+'</b><p>'+esc(e.summary)+'</p><small>'+esc(e.source_name)+" / "+esc(e.source_uri)+" / "+esc(e.observed_at)+'</small>'+imageButton(e)+'</div>').join("")),
+      screen?detail("ChatGPTで確認する項目",list(screen.chatgpt_checks),true):"",
+      screen?'<div class="j-actions">'+button("copy-chatgpt","ChatGPT分析用にコピー")+'</div><p id="j-copy-status" role="status"></p><textarea id="j-copy-text" aria-label="ChatGPTへ渡す分析" readonly hidden></textarea>':"",
       '<p class="j-muted">分析ID：'+esc(r.run_id)+'<br>設定：'+esc(r.config_version)+'<br>判断支援用の記録です。自動売買は行いません。</p>'
     ].join("");
+    if(screen) $("copy-chatgpt").onclick=async()=>{
+      const output=buildChatGPTText(results,horizon,kind);
+      try {await navigator.clipboard.writeText(output);$("copy-status").textContent="コピーしました。ChatGPTへ貼り付けて確認してください。";}
+      catch {const field=$("copy-text");field.hidden=false;field.value=output;field.focus();field.select();
+        $("copy-status").textContent="自動コピーできませんでした。表示された文章を選択してコピーしてください。";}
+    };
     set("horizon",horizon);set("scenario",scenario);
     $("horizon").onchange=()=>{horizon=val("horizon");scenario="";renderResult();};
     $("scenario").onchange=()=>{scenario=val("scenario");renderResult();};
@@ -278,7 +348,7 @@ export function createJudgment(root,getUser,getSecurities) {
     ].join("");
     const legacy=root.querySelector(".j-inputs");
     const normal=document.createElement("div");normal.className="panel j-inputs";
-    normal.innerHTML='<h2>銘柄を判断する</h2><div class="j-grid" id="j-basic"></div><div class="j-actions" id="j-submit"></div>';
+    normal.innerHTML='<h2>銘柄を判断する</h2><p class="j-muted">客観データで一次選別します。最終売買判断は、追加調査とチャートの目視確認後に行ってください。</p><div class="j-grid" id="j-basic"></div><div class="j-actions" id="j-submit"></div>';
     const basic=normal.querySelector("#j-basic");
     basic.append($("symbol").closest("label"),$("securities"),$("entry").closest("label"));
     const action=$("analyze");action.textContent="銘柄を判断する";normal.querySelector("#j-submit").append(action);
@@ -375,7 +445,7 @@ export function createJudgment(root,getUser,getSecurities) {
       else {
         const horizonScore=h=>{const x=results[h];return x?.scores?.[scenario.split(":")[0]]||x?.scores?.["現値"]||Object.values(x?.scores||{})[0]||{};};
     $("result").hidden=false;
-        $("result").innerHTML='<h2>'+esc(response.symbol+" "+response.name)+'</h2><div class="j-verdict"><strong>評価保留</strong></div><p>判断に必要な株価情報を取得できませんでした。</p>'+detail("不足データ",list(response.missing),true);
+        $("result").innerHTML='<h2>'+esc(response.symbol+" "+response.name)+'</h2><div class="j-verdict"><strong>要確認</strong></div><p>判断に必要な株価情報を取得できませんでした。</p>'+detail("不足データ",list(response.missing),true);
       }
       message((response.notices?.length?"一部データを自動取得できませんでした。取得済み情報で分析しています。 ":"")+
         (response.saved?"分析結果を履歴に保存しました。":"分析履歴はまだ保存されていません。"));

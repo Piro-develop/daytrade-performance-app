@@ -39,18 +39,28 @@ def test_automatic_engine_firestore_roundtrip_without_fake_scores(monkeypatch):
     response={"symbol":meta["symbol"],"name":meta["name"],"as_of":meta["as_of"],
               "metadata":meta,"csv":raw,"notices":[]}
     monkeypatch.setattr(automatic,"acquire",lambda _:copy.deepcopy(response))
-    db=FakeFirestore();service=JudgmentService(store=store(db))
+    class NoAI:
+        def assess(self,*args,**kwargs): raise AssertionError("Normal screening must never call AI")
+    db=FakeFirestore();service=JudgmentService(store=store(db),assessment_provider=NoAI())
     out=service.automatic("alice",{"symbol":"7203"})
     assert out["saved"] and set(out["results"])=={"swing","midlong"} and db.commits==1
     for result in out["results"].values():
-        assert all(s["investment"] is None for s in result["scores"].values())
+        first=result["scores"]["現値"]
+        assert first["investment"] is not None and first["coverage"]>0
+        assert result["metadata"]["screening"]["label"] in {"通過","要確認","非通過"}
+        assert result["metadata"]["screening"]["chatgpt_checks"]
+        assert not any(k.startswith(("SC-","MC-")) for k in first["items"])
+        assert not any(f["severity"]=="Critical" and f["code"]=="financial_missing" for f in result["findings"])
+        if result["metadata"]["horizon"]=="midlong":
+            assert first["coverage"]==pytest.approx(2/39)
+            assert first["investment"]==first["items"]["ML-I"]["score"]
         assert all(d["label"] not in {"買い","強気買い"} for d in result["decisions"].values())
         assert store(db).get(result["run_id"])==result
         assert result["metadata"]["automatic"]["assessment_provider"] if "assessment_provider" in result["metadata"]["automatic"] else True
     before=copy.deepcopy(db.docs)
     response["csv"]=None
     held=service.automatic("alice",{"symbol":"7203"})
-    assert held["status"]=="評価保留" and not held["saved"] and db.docs==before
+    assert held["status"]=="要確認" and not held["saved"] and db.docs==before
     assert held["missing"]==["確定日足の株価・出来高"]
 
 def test_price_level_ticks_keep_rr_and_stop_first():
@@ -93,3 +103,50 @@ def test_fallback_source_and_observation_time_survive_to_evidence(monkeypatch):
         assert ev["observed_at"]!=ev["fetched_at"]
         assert ev["content_hash"]
     assert not any("5分足" in n for n in result["notices"])
+
+def test_screening_uses_risk_and_structure_not_missing_qualitative():
+    from investment_app.screening import classify
+    from investment_app.models import Finding,Severity
+    from decimal import Decimal
+    cfg=load_config()
+    rows=[dict(ma13=110+i,ma25=100+i,ma50=90+i,ma75=80+i,close=120+i) for i in range(6)]
+    tech={"daily":rows,"weekly_trend":"上昇"}
+    scores={"現値":SimpleNamespace(coverage=1,entry=8,entry_coverage=.95)}
+    plan=SimpleNamespace(rr=Decimal("2"),kind="現値",trigger_confirmed=True)
+    earnings={"state":"none_within_30_days"}
+    label=lambda fs=():classify(tech,[plan],scores,list(fs),earnings,{},cfg)[0]
+    assert label()=="通過"
+    plan.rr=Decimal("1")
+    assert label()=="要確認" # Low RR alone never rejects the stock.
+    plan.rr=Decimal("2")
+    scores["現値"].coverage=.05
+    assert label()=="要確認"
+    scores["現値"].coverage=1
+    assert label([Finding("confirmed",Severity.SEVERE,"decision","実在する重大リスク")])=="要確認"
+    assert label([Finding("conflict",Severity.CRITICAL,"all","銘柄矛盾")])=="非通過"
+    earnings["state"]="unknown"
+    assert label()=="要確認"
+
+
+def test_screening_retains_critical_and_severe_approval():
+    from investment_app.screening import apply_screening
+    from investment_app.uat_service import bundle_from_input,run_all
+    from investment_app.models import Severity
+    raw,meta=demo()
+    meta["automatic"]={"notices":[]};meta["screening"]=True
+    meta["warnings"]=[{"code":"confirmed_material","severity":"Severe","scope":"decision",
+        "reason":"確認された重大リスク","evidence_ids":["demo-financial"]}]
+    meta["severe_conditions"]={"confirmed_material":{"reason":"根拠確認済み","remaining_risk":"残存リスク",
+        "evidence_ids":["demo-financial"]}}
+    bundle=bundle_from_input(raw,meta,meta["symbol"],meta["as_of"])
+    db=FakeFirestore()
+    result=run_all(bundle,store(db))["swing"]
+    decision=result["decisions"]["現値:avoid"]
+    assert decision["approval_required"] and decision["approval_eligible"]
+    assert decision["label"]=="要確認"
+    meta["warnings"].append({"code":"actual_conflict","severity":"Critical","scope":"all",
+        "reason":"解消していない銘柄矛盾","evidence_ids":["demo-financial"]})
+    result=run_all(bundle_from_input(raw,meta,meta["symbol"],meta["as_of"]),store(db))["swing"]
+    assert result["decisions"]["現値:avoid"]["label"]=="非通過"
+    assert not result["decisions"]["現値:avoid"]["approval_eligible"]
+    assert result["scores"]["現値"]["investment"] is None

@@ -35,6 +35,9 @@ def run_all(bundle,history,policy="unspecified",entry=None):
         pending.append((result,b,c));results[h]=plain(result)
     if bundle.metadata.get("automatic"):
         for result,source,c in pending:
+            if bundle.metadata.get("screening"):
+                from .screening import apply_screening
+                apply_screening(result,source,c)
             result.metadata["automatic"]=copy.deepcopy(bundle.metadata["automatic"])
             from .automatic_assessment import missing_reason
             cards=all_cards()
@@ -109,6 +112,9 @@ def recommendation(results, now=None):
     preferred=[]
     for h,r in results.items():
         if h not in ("swing","midlong"): continue
+        if r["metadata"].get("screening"):
+            if r["metadata"]["screening"]["label"]=="通過" and any(time_value(p["expires_at"])>=now for p in r["plans"]): preferred.append(h)
+            continue
         current=r["decisions"].get("現値:avoid") or next(iter(r["decisions"].values()))
         plan=next((p for p in r["plans"] if p["kind"]=="現値"),None)
         if plan and time_value(plan["expires_at"])>=now and current["status"] in ("評価可能","暫定評価") and not current["approval_required"] and current["label"] in ("買い","条件付き買い","打診買い"):
