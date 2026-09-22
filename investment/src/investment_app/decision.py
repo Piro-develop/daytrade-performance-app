@@ -25,10 +25,10 @@ def decide(bundle: Bundle, scores: ScoreResult, plan: EntryPlan | None, findings
     # Scope-qualified severe conditions remain visible, including while scores are incomplete.
     if scores.investment is None or scores.entry is None:
         return Decision("Severe警告付き条件判断" if severe else None,EvaluationStatus.PROVISIONAL,None,buy,
-            ["未評価の採点カードを補完してください。"],findings,[],refs,bool(severe),False)
-    if scores.status!=EvaluationStatus.EVALUABLE or scores.entry_status!=EvaluationStatus.EVALUABLE or any(f.code=="stale_prices" for f in findings):
-        return Decision("Severe警告付き条件判断" if severe else None,EvaluationStatus.PROVISIONAL,None,buy,
-            ["データ日時・鮮度の制約を解消して再評価してください。"],findings,[],refs,bool(severe),False)
+            ["投資妙味またはEntryの評価済み配点が60%未満です。成立している側のスコアは保持しています。"],findings,[],refs,bool(severe),False)
+    provisional=(scores.status!=EvaluationStatus.EVALUABLE or scores.entry_status!=EvaluationStatus.EVALUABLE
+        or any(f.code in ("stale_prices","evidence_freshness","earnings_missing") or f.code.startswith("unchecked_") for f in findings))
+    status=EvaluationStatus.PROVISIONAL if provisional else EvaluationStatus.EVALUABLE
     inv,entry=scores.investment,scores.entry
     overrides=[]
     material=dominant_material(bundle)
@@ -82,6 +82,9 @@ def decide(bundle: Bundle, scores: ScoreResult, plan: EntryPlan | None, findings
     if any(f.severity==Severity.WARNING for f in findings) and candidate in {"買い","強気買い","打診買い"}:
         candidate="条件付き買い"
         reasons.append("Warningの確認・解消条件を満たすことが必要")
+    if provisional:
+        if candidate in {"買い","強気買い","打診買い"}: candidate="条件付き買い"
+        reasons.insert(0,"暫定評価。coverage・未確認情報・鮮度の制約を確認してください。")
     for override in overrides:
         override.update({"direction":material["direction"],"base_decision":base_decision,
             "candidate_decision":candidate,"scope":horizon+":"+earnings_scenario,
@@ -111,5 +114,5 @@ def decide(bundle: Bundle, scores: ScoreResult, plan: EntryPlan | None, findings
                 "base_decision":base_decision,"candidate_decision":candidate,"plan_id":plan.plan_id,
                 "scope":horizon+":"+earnings_scenario})
         eligible=complete and candidate in {"買い","条件付き買い","打診買い"}
-        return Decision("Severe警告付き条件判断",EvaluationStatus.EVALUABLE,candidate,buy,waits,findings,overrides,refs,True,eligible)
-    return Decision(candidate,EvaluationStatus.EVALUABLE,candidate,buy,waits,findings,overrides,refs)
+        return Decision("Severe警告付き条件判断",status,candidate,buy,waits,findings,overrides,refs,True,eligible)
+    return Decision(candidate,status,candidate,buy,waits,findings,overrides,refs)

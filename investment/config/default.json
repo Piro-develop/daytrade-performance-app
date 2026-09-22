@@ -1,9 +1,9 @@
 {
-  "config_version": "swing-1.0.0",
+  "config_version": "swing-coverage-3.0.0",
   "schema_version": 1,
   "mix": [
-    0.7,
-    0.3
+    1,
+    0
   ],
   "anchors": [
     1,
@@ -164,5 +164,7 @@
     "constrained": 0.5,
     "missing": 0
   },
-  "rsi_method": "rolling_simple"
+  "rsi_method": "rolling_simple",
+  "coverage_min": 0.6,
+  "coverage_normal": 0.8
 }

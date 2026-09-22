@@ -172,6 +172,15 @@ class PublicFactsProvider:
         if financial:
             try:
                 raw=download(financial['url']);pages,text=pdf_text(raw,symbol);table=financial_table(pages)
+                if not table:
+                    # A verified issuer report can satisfy the official-evidence prerequisite
+                    # even when this parser cannot safely convert its IFRS numeric layout.
+                    header=re.sub(r'\s+','',pages[0])
+                    period=re.search(r'(20\d{2}年\d{1,2}月期(?:第[123]四半期|中間期)?)決算短信',header)
+                    if period and ('IFRS' in header or '日本基準' in header) and '営業利益' in header:
+                        eid=add('financial-report','会社公表 決算短信（数値カード変換未対応）',financial['url'],raw,text[:18000],observed=financial['published_at'],published=financial['published_at'],original=True)
+                        facts['official_financial']={'period':period[1],'evidence_ids':[eid],
+                            'latest_confirmed':(asof-datetime.fromisoformat(financial['published_at'])).days<=120}
                 if table:
                     eid=add('financial','会社公表 決算短信（TDnet原文）',financial['url'],raw,json.dumps(table,ensure_ascii=False)+'\n'+text[:18000],observed=financial['published_at'],published=financial['published_at'],original=True)
                     facts['financial']={**table,'evidence_ids':[eid],'published_at':financial['published_at'],'period':table['current']['period'],'latest_confirmed':(asof-datetime.fromisoformat(financial['published_at'])).days<=120}

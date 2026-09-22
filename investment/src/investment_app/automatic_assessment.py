@@ -34,6 +34,9 @@ def prepare_automatic(bundle):
         reason=f'{count}確定日すべて出来高あり。日足から算出した売買代金の下限/上限={lower:.0f}/{upper:.0f}円（実売買代金ではない）。最大寄付ギャップ={max(gaps):.2f}円。継続売買と価格飛びの制約を確認。'
         meta.setdefault('preflight_review',{})['liquidity']=dict(reviewed=True,anchor=6,evidence_ids=[meta['market_evidence_id']],reason=reason)
     facts=meta.get('public_facts',{});f=facts.get('financial',{});rev=facts.get('revision',{})
+    report=facts.get('official_financial',{})
+    if report.get('latest_confirmed') and all(r in bundle.evidence for r in report.get('evidence_ids',[])):
+        meta['latest_financial']=report.copy()
     rows=meta.setdefault('assessments',[]);used={r['criterion_id'] for r in rows}
     def put(code,value,refs,reason,counter):
         if code not in used and refs and all(r in bundle.evidence for r in refs):

@@ -22,8 +22,10 @@ def validate_config(cfg: dict) -> None:
         weights = cfg[key]
         if sum(weights.values()) != 100 or any(not isinstance(v, (int, float)) or v <= 0 for v in weights.values()):
             raise InputError("配点合計は100、各配点は正数である必要があります。")
-    if cfg["mix"] != [0.7, 0.3]:
-        raise InputError("投資妙味の70%＋30%は変更できません。")
+    if cfg["mix"] != [1, 0]:
+        raise InputError("投資妙味は構造化評価のみ。定性評価は独立した補足です。")
+    if not 0 < cfg["coverage_min"] <= cfg["coverage_normal"] <= 1:
+        raise InputError("coverage閾値は0超〜1の昇順で指定してください。")
     for key in ("rr_knots", "upside_knots"):
         points = cfg[key]
         if any(points[i][0] >= points[i+1][0] or points[i][1] > points[i+1][1] for i in range(len(points)-1)):

@@ -80,34 +80,37 @@ def investment_items(bundle: Bundle, technical: dict, cfg: dict) -> dict:
     else:
         computed("SW-D2",None,"週足の確定高安比較に必要なpivotが不足")
     # P02: missing event evidence invalidates its cards, not unrelated components.
-    if not bundle.metadata.get("earnings_at"):
+    from .application import earnings_info
+    if earnings_info(bundle,"unspecified")["state"]=="unknown":
         computed("SW-H",None,"次回決算予定が未確認のため、イベント合理性は未評価")
     if not macro_chain(bundle)["valid"]:
         computed("SW-F",None,"セクター→ドライバー→企業感応度→個別比較のEvidenceが不足")
         computed("SC-4",None,"支配関係の解釈に必要なマクロ経路が不足")
     return items
 
+def weighted_available(items, weights):
+    available={code:weight for code,weight in weights.items() if items.get(code,{}).get("score") is not None}
+    covered=sum(available.values());total=sum(weights.values())
+    value=sum(items[code]["score"]*weight for code,weight in available.items())/covered if covered else None
+    return value,covered/total if total else 0.0,[code for code in weights if code not in available]
+
+
+def coverage_status(value,coverage,cfg):
+    return EvaluationStatus.EVALUABLE if value is not None and coverage>=cfg["coverage_normal"] else EvaluationStatus.PROVISIONAL
+
+
 def aggregate_investment(items: dict, cfg: dict):
-    parents={}
-    required=[]
-    for axis in cfg["investment_weights"]:
+    # Flatten subcard weights: a 20%-axis / 25%-subcard retains 5% of the original total.
+    weights={}
+    for axis,weight in cfg["investment_weights"].items():
         if axis in cfg["subweights"]:
-            codes=[f"SW-{axis}{i}" for i in range(1,5)]
-            required.extend(codes)
-            values=[items.get(code,{}).get("score") for code in codes]
-            parents[axis]=None if any(v is None for v in values) else sum(v*w for v,w in zip(values,cfg["subweights"][axis]))/100
-        else:
-            code=f"SW-{axis}";required.append(code)
-            parents[axis]=items.get(code,{}).get("score")
-    contexts=[f"SC-{i}" for i in range(1,7)]
-    required.extend(contexts)
-    missing=[code for code in required if items.get(code,{}).get("score") is None]
-    structured=None if any(v is None for v in parents.values()) else sum(parents[k]*w for k,w in cfg["investment_weights"].items())/100
-    cv=[items.get(code,{}).get("score") for code in contexts]
-    context=None if any(v is None for v in cv) else sum(cv)/len(cv)
-    total=None if structured is None or context is None else structured*.7+context*.3
-    coverage=sum(w for k,w in cfg["investment_weights"].items() if parents[k] is not None)/100
-    return structured,context,total,missing,coverage
+            weights.update({f"SW-{axis}{i}":weight*sub/100 for i,sub in enumerate(cfg["subweights"][axis],1)})
+        else: weights[f"SW-{axis}"]=weight
+    structured,coverage,missing=weighted_available(items,weights)
+    context,_,_=weighted_available(items,{f"SC-{i}":1 for i in range(1,7)})
+    investment=structured if coverage+1e-12>=cfg["coverage_min"] else None
+    return structured,context,investment,missing,coverage
+
 
 def entry_items(bundle: Bundle, tech: dict, plan: EntryPlan, cfg: dict, manual: dict) -> dict:
     tid=tech["technical_evidence_id"]
@@ -115,7 +118,8 @@ def entry_items(bundle: Bundle, tech: dict, plan: EntryPlan, cfg: dict, manual: 
     def set_score(code,score,reason):
         out[code]={"score":score,"reason":reason,"counter_reason":"価格構造は将来の約定を保証しない",
                    "evidence_ids":list(plan.evidence_ids),"evaluator":"program"}
-    if not bundle.metadata.get("earnings_at"):
+    from .application import earnings_info
+    if earnings_info(bundle,"unspecified")["state"]=="unknown":
         set_score("SE-G",None,"次回決算予定が未確認のため、直近タイミングは未評価")
     upside=float((plan.target1-plan.entry)/plan.entry*100)
     set_score("SE-A",interpolate(upside,cfg["upside_knots"]),f"第1利確までの余地 {upside:.4f}%")
@@ -158,18 +162,14 @@ def entry_items(bundle: Bundle, tech: dict, plan: EntryPlan, cfg: dict, manual: 
 def score(bundle: Bundle, tech: dict, plan: EntryPlan | None, cfg: dict) -> ScoreResult:
     items=investment_items(bundle,tech,cfg)
     structured,context,total,missing,coverage=aggregate_investment(items,cfg)
-    entry=None
-    estatus=EvaluationStatus.UNAVAILABLE if plan is None else EvaluationStatus.PROVISIONAL
+    entry=None;entry_coverage=0.0
     if plan is not None:
         entries=entry_items(bundle,tech,plan,cfg,checked_manual(bundle))
         items.update(entries)
-        emissing=[f"SE-{k}" for k in cfg["entry_weights"] if entries.get(f"SE-{k}",{}).get("score") is None]
-        if not emissing:
-            entry=sum(entries[f"SE-{k}"]["score"]*w for k,w in cfg["entry_weights"].items())/100
-            estatus=EvaluationStatus.EVALUABLE
+        value,entry_coverage,emissing=weighted_available(entries,{f"SE-{k}":w for k,w in cfg["entry_weights"].items()})
+        if entry_coverage+1e-12>=cfg["coverage_min"]: entry=value
         missing+=emissing
     else:
         missing += [f"SE-{k}" for k in cfg["entry_weights"]]
     return ScoreResult(structured,context,total,entry,
-        EvaluationStatus.EVALUABLE if total is not None else EvaluationStatus.PROVISIONAL,
-        estatus,items,missing,coverage)
+        coverage_status(total,coverage,cfg),coverage_status(entry,entry_coverage,cfg),items,missing,coverage,entry_coverage)

@@ -26,5 +26,5 @@ def selected_result(results,horizon,scenario,now=None,stale=False):
           (decision["wait_reasons"][0] if decision["wait_reasons"] else "明示された重大警告なし。原資料で確認してください。"),
       "approval_required":decision["approval_required"],
       "can_recommend":not (stale or expired or critical or decision["approval_required"]) and
-          decision["status"]=="評価可能" and kind=="現値" and label in ("買い","条件付き買い","打診買い")
+          decision["status"] in ("評価可能","暫定評価") and kind=="現値" and label in ("買い","条件付き買い","打診買い")
     }

@@ -14,20 +14,26 @@ from .technical import compute, number
 
 def earnings_info(bundle: Bundle, policy: str) -> dict:
     scheduled=bundle.metadata.get("earnings_at")
-    result={"scheduled_at":scheduled, "policy":policy,"business_days":None,
-            "scenarios":["allow","avoid"] if policy=="unspecified" else [policy],"within_month":None}
-    if not scheduled:
-        return result
-    event=time_value(scheduled).astimezone(JST).date()
     today=time_value(bundle.as_of).astimezone(JST).date()
-    sessions=bundle.metadata.get("calendar",[])
-    if sessions and min(sessions)<=today.isoformat() and max(sessions)>=event.isoformat():
-        result["business_days"]=sum(today.isoformat()<day<=event.isoformat() for day in sessions)
-    month=today.month%12+1
-    year=today.year+(today.month==12)
-    limit=today.replace(year=year,month=month,day=min(today.day,calendar.monthrange(year,month)[1]))
-    result["within_month"]=today<=event<=limit
+    result={"scheduled_at":None,"state":"unknown","policy":policy,"business_days":None,
+            "scenarios":["allow","avoid"] if policy=="unspecified" else [policy],"within_month":None}
+    if scheduled and time_value(scheduled).astimezone(JST).date()>=today:
+        event=time_value(scheduled).astimezone(JST).date()
+        result.update(scheduled_at=scheduled,state="confirmed",within_month=(event-today).days<=30)
+        sessions=bundle.metadata.get("calendar",[])
+        if sessions and min(sessions)<=today.isoformat() and max(sessions)>=event.isoformat():
+            result["business_days"]=sum(today.isoformat()<day<=event.isoformat() for day in sessions)
+    else:
+        window=bundle.metadata.get("earnings_window",{})
+        refs=window.get("evidence_ids",[])
+        # Absence is accepted only as an explicit, dated evidence-backed confirmation.
+        if (window.get("no_earnings") is True and refs and all(r in bundle.evidence for r in refs)
+            and window.get("checked_at") and window.get("confirmed_through")
+            and 0<=(time_value(bundle.as_of)-time_value(window["checked_at"])).total_seconds()<=86400
+            and time_value(window["confirmed_through"]).astimezone(JST).date()>=today+timedelta(days=30)):
+            result.update(state="none_within_30_days",within_month=False)
     return result
+
 
 def analyze(bundle: Bundle, cfg: dict, specified_entry=None, earnings_policy="unspecified") -> AnalysisResult:
     if earnings_policy not in {"allow","avoid","unspecified"}:
@@ -53,12 +59,12 @@ def analyze(bundle: Bundle, cfg: dict, specified_entry=None, earnings_policy="un
     earnings=earnings_info(bundle,earnings_policy)
     if technical["atr"] is None:
         findings.append(Finding("atr_missing",Severity.WARNING,"entry","ATR不足。価格帯集約と損切余幅は呼値だけで計算しています。"))
-    if earnings["scheduled_at"] is None:
+    if earnings["state"]=="unknown":
         findings.append(Finding("earnings_missing",Severity.WARNING,"decision",
-            "次回決算日が不明です。跨ぎ判断とイベント採点は未評価。"))
+            "決算予定未確認。イベントカードは欠損としてcoverageへ反映し、他の評価は継続します。"))
     elif earnings["within_month"]:
         findings.append(Finding("earnings_near",Severity.WARNING,"decision",
-            "1か月以内に決算予定があります。跨ぐ／跨がない条件を確認してください。",
+            "30日以内に決算予定があります。跨ぐ／跨がない条件を確認してください。",
             tuple(bundle.metadata.get("earnings_evidence_ids",[]))))
     all_scores,decisions={},{}
     for plan in plans or [None]:
@@ -101,7 +107,7 @@ def analyze(bundle: Bundle, cfg: dict, specified_entry=None, earnings_policy="un
     result=AnalysisResult(str(uuid.uuid4()),bundle.bundle_id,bundle.as_of,bundle.symbol,bundle.name,
         version,cfg_hash,plain(bundle.evidence),technical_snapshot,plans,all_scores,decisions,earnings,
         confidence(bundle,findings,first_score.items),
-        {"is_demo":bool(bundle.metadata.get("is_demo")),"exit_conditions":bundle.metadata.get("exit_conditions",[]),
+        {"evaluation_policy":"coverage-v1","is_demo":bool(bundle.metadata.get("is_demo")),"exit_conditions":bundle.metadata.get("exit_conditions",[]),
          "input_digest":digest({"symbol":bundle.symbol,"as_of":bundle.as_of,"metadata":bundle.metadata,
                                "bars":bundle.bars,"specified_entry":specified_entry,"earnings_policy":earnings_policy}),
          "source_mode":"manual_csv","model_version":"manual-card-evaluation","card_version":"cards-1.0.0"},

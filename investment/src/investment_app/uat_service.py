@@ -111,6 +111,6 @@ def recommendation(results, now=None):
         if h not in ("swing","midlong"): continue
         current=r["decisions"].get("現値:avoid") or next(iter(r["decisions"].values()))
         plan=next((p for p in r["plans"] if p["kind"]=="現値"),None)
-        if plan and time_value(plan["expires_at"])>=now and current["status"]=="評価可能" and not current["approval_required"] and current["label"] in ("買い","条件付き買い","打診買い"):
+        if plan and time_value(plan["expires_at"])>=now and current["status"] in ("評価可能","暫定評価") and not current["approval_required"] and current["label"] in ("買い","条件付き買い","打診買い"):
             preferred.append(h)
     return preferred

@@ -158,6 +158,7 @@ class ScoreResult:
     items: dict
     missing: list[str]
     coverage: float
+    entry_coverage: float = 0.0
 
 @dataclass
 class Decision:

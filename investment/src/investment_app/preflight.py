@@ -14,8 +14,13 @@ def preflight(bundle: Bundle, weekly_count: int | None = None) -> list[Finding]:
         check = review.get(key, {})
         refs = tuple(check.get("evidence_ids", []))
         if not check.get("reviewed") or not refs or any(x not in bundle.evidence for x in refs):
-            findings.append(Finding("unchecked_" + key, Severity.CRITICAL, "decision",
+            findings.append(Finding("unchecked_" + key, Severity.WARNING, "decision",
                 label + "の独立確認が完了していません。", resolution="根拠付き確認を入力"))
+    financial=meta.get("latest_financial",{})
+    refs=tuple(financial.get("evidence_ids",[]))
+    if not financial.get("latest_confirmed") or not financial.get("period") or not refs or any(r not in bundle.evidence for r in refs):
+        findings.append(Finding("financial_missing",Severity.CRITICAL,"investment",
+            "最新の公式業績根拠（対象期・Evidence付き）を確認できません。Entryは独立評価します。"))
     for item in meta.get("warnings", []):
         refs = tuple(item.get("evidence_ids", []))
         if not refs or any(x not in bundle.evidence for x in refs) or not item.get("reason"):
@@ -81,6 +86,7 @@ def confidence(bundle: Bundle, findings: list[Finding], items: dict, required_ca
         cross=0.0 if check.get("unresolved_conflict") else 1.0 if matched else 0.5
         return fresh,source,cross
     for code in (catalog() if required_cards is None else required_cards):
+        if code.startswith(("SC-","MC-")): continue # Optional context is not required coverage or confidence.
         item=items.get(code,{})
         refs=item.get("evidence_ids",[])
         present=bool(item.get("score") is not None and refs and all(r in bundle.evidence for r in refs))

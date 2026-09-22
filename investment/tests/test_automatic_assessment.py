@@ -81,11 +81,45 @@ def test_missing_event_invalidates_only_event_cards_and_saved_gaps():
                 assert {k:v for k,v in score['items'][code].items() if k!='evidence_ids'}=={k:v for k,v in item.items() if k!='evidence_ids'}
                 assert all(ref in r['evidence'] for ref in score['items'][code]['evidence_ids'])
         assert score['context']==old['context']
-        assert score['entry'] is None
-        if horizon=='swing': assert score['investment'] is None and score['structured'] is None
-        else: assert score['investment']==old['investment']
+        assert score['entry'] is not None and score['entry_coverage']==.95
+        assert score['investment'] is not None
+        assert score['coverage']==(.96 if horizon=='swing' else 1)
+        if horizon=='midlong': assert score['investment']==old['investment']
         auto=r['metadata']['automatic']
         assert 'obsolete fixed message' not in auto['missing']
         assert set(auto['card_gaps'])==set(score['missing'])
         assert set(auto['card_gaps_by_plan'])==set(r['scores'])
         assert all(d['label'] not in ('買い','強気買い') for d in r['decisions'].values())
+
+
+def test_coverage_thresholds_optional_context_and_critical_scope():
+    from investment_app.config import load_config
+    from investment_app.scoring import weighted_available, aggregate_investment
+    from investment_app.application import earnings_info
+    cfg=load_config()
+    value,cov,gaps=weighted_available({'a':{'score':8},'b':{'score':None}},{'a':60,'b':40})
+    assert (value,cov,gaps)==(8,.6,['b'])
+    items={f'SW-{k}':{'score':8} for k in ('B','C','F','G','H','I','J')}
+    items['SW-A3']={'score':4} # 20% * 20% = 4%; total covered = 60%.
+    structured,context,total,missing,cov=aggregate_investment(items,cfg)
+    assert cov==.6 and total==pytest.approx((56*8+4*4)/60) and context is None
+    items.pop('SW-A3');assert aggregate_investment(items,cfg)[2] is None
+    items.update({f'SC-{i}':{'score':10} for i in range(1,7)})
+    assert aggregate_investment(items,cfg)[2] is None # AI never repairs low coverage.
+    raw,meta=demo();meta['assessments']=[x for x in meta['assessments'] if not x['criterion_id'].startswith(('SC-','MC-'))]
+    meta['preflight_review']={};meta.pop('earnings_at')
+    b=bundle_from_input(raw,meta,meta['symbol'],meta['as_of']);out=run_all(b,Store())
+    for r in out.values():
+        score=r['scores']['現値']
+        assert score['investment'] is not None and score['entry'] is not None and score['context'] is None
+        assert all(f['severity']=='Warning' for f in r['findings'] if f['code'].startswith('unchecked_'))
+        assert r['decisions']['現値:avoid']['label'] is not None
+        assert r['decisions']['現値:avoid']['status']=='暫定評価'
+    b.metadata.pop('latest_financial');held=run_all(b,Store())
+    assert all(r['scores']['現値']['investment'] is None and r['scores']['現値']['entry'] is not None for r in held.values())
+    assert earnings_info(b,'avoid')['state']=='unknown'
+    b.metadata['earnings_window']={'no_earnings':True,'evidence_ids':['demo-financial'],'checked_at':b.as_of,
+        'confirmed_through':(time_value(b.as_of)+timedelta(days=30)).isoformat()}
+    assert earnings_info(b,'avoid')['state']=='none_within_30_days'
+    b.metadata['earnings_window']['evidence_ids']=[]
+    assert earnings_info(b,'avoid')['state']=='unknown'
