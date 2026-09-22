@@ -75,8 +75,9 @@ def score_horizon(bundle,tech,plan,cfg,horizon):
     if plan:
         stress=items.get("ME-E-STRESS",{}).get("score")
         refs=list(plan.evidence_ids)+items.get("ME-E-STRESS",{}).get("evidence_ids",[])
-        put("ME-E",None if stress is None else (interpolate(plan.rr,cfg["rr_knots"])+stress)/2,
-            f"RR={plan.rr}の補間とストレス評価={stress}を等重み集約",refs)
+        put("ME-E",interpolate(plan.rr,cfg["rr_knots"]) if stress is None else (interpolate(plan.rr,cfg["rr_knots"])+stress)/2,
+            f"RR={plan.rr}の補間とストレス評価={stress}。各50%の元配点で評価済み側だけを集約。",refs)
+        items["ME-E"]["coverage"]=.5 if stress is None else 1.0
     if plan is None:
         for k in h["entry_weights"]: put(h["entry_prefix"]+"-"+k,None,"有効な価格プランが未算出",[])
     elif plan.kind!="現値":
@@ -89,6 +90,7 @@ def score_horizon(bundle,tech,plan,cfg,horizon):
     context,_,_=weighted_available(items,dict.fromkeys(cc,1))
     investment=structured if coverage+1e-12>=cfg["coverage_min"] else None
     value,entry_coverage,emissing=weighted_available(items,dict(zip(ec,h["entry_weights"].values())))
+    if plan and plan.kind=="現値" and stress is None: emissing.append("ME-E-STRESS")
     entry=value if plan and entry_coverage+1e-12>=cfg["coverage_min"] else None
     return ScoreResult(structured,context,investment,entry,
         coverage_status(investment,coverage,cfg),coverage_status(entry,entry_coverage,cfg),items,missing+emissing,coverage,entry_coverage)

@@ -51,7 +51,7 @@ def test_public_facts_reach_cards_preflight_confidence_and_decision():
     with pytest.raises(InputError): apply_qualitative(b,BadProvider())
 
 
-def test_financial_table_preserves_periods_units_and_revision_comparison():
+def test_financial_table_preserves_periods_units_and_revision_comparison(monkeypatch):
     text='''2027年3月期 第1四半期 決算短信 日本基準 連結 百万円 売上高 営業利益 経常利益
 2027年3月期第1四半期 27,501 44.4 5,117 196.9 5,228 209.5 3,116 216.5
 2026年3月期第1四半期 19,046 8.6 1,723 62.8 1,689 41.4 984 61.7
@@ -65,6 +65,11 @@ def test_financial_table_preserves_periods_units_and_revision_comparison():
     assert revision_table(revision,f['forecast'])['previous'][1]==11000
     assert financial_table([text.replace('2026年3月期第1四半期','2026年3月期第2四半期')])=={}
     assert revision_table(revision.replace('12,500','12,600'),f['forecast'])=={}
+    from types import SimpleNamespace
+    from judgment.public_facts import pdf_text
+    monkeypatch.setattr('pypdf.PdfReader',lambda _:SimpleNamespace(pages=[SimpleNamespace(extract_text=lambda:'コ ー ド 番 号 7203 URL https://example.invalid')]))
+    assert pdf_text(b'controlled fixture','7203')[0]
+    with pytest.raises(ValueError,match='issuer_not_confirmed'): pdf_text(b'controlled fixture','4461')
 
 
 def test_missing_event_invalidates_only_event_cards_and_saved_gaps():
@@ -99,6 +104,7 @@ def test_coverage_thresholds_optional_context_and_critical_scope():
     cfg=load_config()
     value,cov,gaps=weighted_available({'a':{'score':8},'b':{'score':None}},{'a':60,'b':40})
     assert (value,cov,gaps)==(8,.6,['b'])
+    assert weighted_available({'rr':{'score':8,'coverage':.5}},{'rr':10})[:2]==(8,.5)
     items={f'SW-{k}':{'score':8} for k in ('B','C','F','G','H','I','J')}
     items['SW-A3']={'score':4} # 20% * 20% = 4%; total covered = 60%.
     structured,context,total,missing,cov=aggregate_investment(items,cfg)

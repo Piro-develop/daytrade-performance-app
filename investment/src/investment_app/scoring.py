@@ -89,7 +89,7 @@ def investment_items(bundle: Bundle, technical: dict, cfg: dict) -> dict:
     return items
 
 def weighted_available(items, weights):
-    available={code:weight for code,weight in weights.items() if items.get(code,{}).get("score") is not None}
+    available={code:weight*items[code].get("coverage",1.0) for code,weight in weights.items() if items.get(code,{}).get("score") is not None}
     covered=sum(available.values());total=sum(weights.values())
     value=sum(items[code]["score"]*weight for code,weight in available.items())/covered if covered else None
     return value,covered/total if total else 0.0,[code for code in weights if code not in available]

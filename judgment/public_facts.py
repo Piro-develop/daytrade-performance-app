@@ -55,7 +55,7 @@ def pdf_text(raw, symbol):
     if len(reader.pages)>60: raise ValueError('document_page_limit')
     pages = [unicodedata.normalize('NFKC', p.extract_text() or '') for p in reader.pages]
     text = '\n'.join(pages)
-    if len(text)>200000 or not re.search(r'(?:コード番号|証券コード|コード)\D{0,8}'+re.escape(symbol), pages[0]):
+    if len(text)>200000 or not re.search(r'(?:コード番号|証券コード|コード)\D{0,8}'+re.escape(symbol)+r'(?![0-9])', re.sub(r'\s+','',pages[0])):
         raise ValueError('issuer_not_confirmed')
     return pages, text
 
