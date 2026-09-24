@@ -30,3 +30,33 @@ for(const label of ["現値Entry","第1押し目","第2押し目","25日線","13
 assert.ok(!comparison.includes("INTERNAL_SUPPORT_ID"));
 assert.ok(!html.includes("INTERNAL_SUPPORT_ID"));
 console.log("All available Entry scenarios appear in copy and comparison UI");
+
+// Prices from the 2026-09-24 actual-data checks; validate each scenario's own base.
+const priceCases=[
+ ["4461","現値",13860,15890,null,13410,12910,["+14.65%",null,"-3.25%","-6.85%"]],
+ ["4461","第1押し目",13600,15890,null,13410,12910,["+16.84%",null,"-1.40%","-5.07%"]],
+ ["4461","第2押し目",13100,13490,15890,12910,12710,["+2.98%","+21.30%","-1.45%","-2.98%"]],
+ ["9449","現値",3919,3976,3994,3889,3865,["+1.45%","+1.91%","-0.77%","-1.38%"]],
+ ["9449","第1押し目",3912,3976,3994,3889,3865,["+1.64%","+2.10%","-0.59%","-1.20%"]],
+ ["9449","第2押し目",3881,3899,3976,3865,3820,["+0.46%","+2.45%","-0.41%","-1.57%"]],
+];
+for(const [symbol,kind,entry,target1,target2,stop1,stop2,rates] of priceCases){
+ const result={...r,symbol,plans:[{kind,entry,target1,target2,stop1,stop2,rr:2}]};
+ const before=JSON.stringify(result);
+ for(const output of [entryStrategiesHtml(result),buildChatGPTText({swing:result})]){
+  [target1,target2,stop1,stop2].forEach((price,i)=>{
+   const expected=price==null?"該当なし":price.toLocaleString("ja-JP")+"円（"+rates[i]+"）";
+   assert.ok(output.includes(expected),symbol+" "+kind+" "+expected);
+  });
+ }
+ assert.equal(JSON.stringify(result),before,"Display must not mutate stored results");
+}
+const edge={...r,plans:[{kind:"現値",entry:100,target1:100.001,target2:null,stop1:99.999,stop2:null,rr:1}]};
+for(const entry of [100,0,null]){
+ edge.plans[0].entry=entry;
+ for(const output of [entryStrategiesHtml(edge),buildChatGPTText({swing:edge})]){
+  assert.ok(!/（[^）]*%）/.test(output),"No rounded zero or invalid-base percentage");
+  assert.ok(!/NaN|Infinity/.test(output));
+ }
+}
+console.log("4461 / 9449: all three scenario percentages, missing values and unchanged data passed");

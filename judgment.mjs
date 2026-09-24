@@ -39,6 +39,18 @@ const chartLines=tech=>["weekly","daily"].flatMap(frame=>{
   }).concat(["直近確定"+unit+"足 高値 "+num(last.high)+" / 安値 "+num(last.low)+" / 出来高 "+num(last.volume)]);
 });
 
+// Display-only return from each scenario's own Entry; stored prices and RR stay unchanged.
+const strategyValue=(plan,key)=>{
+  if(plan[key]==null) return "該当なし";
+  if(key==="rr") return num(plan[key]);
+  const price=Number(plan[key]),entry=Number(plan.entry);
+  const label=num(plan[key])+"円";
+  if(!["target1","target2","stop1","stop2"].includes(key)||
+    !Number.isFinite(price)||!Number.isFinite(entry)||entry<=0) return label;
+  const rate=(price-entry)/entry*100;
+  const rounded=rate.toFixed(2);
+  return Number(rounded)===0?label:label+"（"+(rate>0?"+":"")+rounded+"%）";
+};
 const strategyName=p=>p.kind==="現値"?"現値Entry":p.kind;
 const strategySupport=(p,t)=>{
   const b=(t.bands||[]).find(b=>b.band_id===p.support_id);
@@ -51,7 +63,7 @@ export function entryStrategiesHtml(r) {
     plans.map(p=>{
       const support=strategySupport(p,r.technical||{});
       return '<article class="j-mini j-strategy"><h3>'+esc(strategyName(p))+'</h3><p>支持帯 '+num(support.low)+'〜'+num(support.high)+'</p><p>支持根拠：'+esc(support.basis.join("＋")||"旧履歴：詳細根拠の記録なし")+'</p><div class="j-metrics">'+
-        [["Entry","entry"],["第1利確","target1"],["最終利確","target2"],["Alert","alert"],["第1損切","stop1"],["最終損切","stop2"],["RR","rr"]].map(([label,key])=>metric(label,p[key]==null?"該当なし":num(p[key]))).join("")+
+        [["Entry","entry"],["第1利確","target1"],["最終利確","target2"],["Alert","alert"],["第1損切","stop1"],["最終損切","stop2"],["RR","rr"]].map(([label,key])=>metric(label,strategyValue(p,key))).join("")+
         metric("RR評価",p.rr_evaluation||"旧規則の履歴")+'</div><p>'+esc(publicInvalidation(p,r.technical||{}))+'</p></article>';
     }).join("")+'</div></section>';
 }
@@ -93,7 +105,7 @@ export function buildChatGPTText(results, selectedHorizon="swing", kind="現値"
       lines.push("#### "+strategyName(plan),"支持帯 "+num(support.low)+"〜"+num(support.high),
         "支持根拠："+(support.basis.join("＋")||"旧履歴：詳細根拠の記録なし"));
       for(const [label,key] of [["Entry候補","entry"],["第1利確","target1"],["最終利確","target2"],
-        ["Alert","alert"],["通常損切","stop1"],["最終損切","stop2"],["RR","rr"]]) lines.push(label+"："+(plan[key]==null?"該当なし":num(plan[key])));
+        ["Alert","alert"],["通常損切","stop1"],["最終損切","stop2"],["RR","rr"]]) lines.push(label+"："+strategyValue(plan,key));
       lines.push("RR評価："+(plan.rr_evaluation||"旧規則の履歴"),"価格構造の無効化："+publicInvalidation(plan,t),"有効期限："+plan.expires_at);
     }
     if(screen.strategy_summary) lines.push("価格戦略の要約："+screen.strategy_summary);
