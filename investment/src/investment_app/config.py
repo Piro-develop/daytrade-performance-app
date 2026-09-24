@@ -32,7 +32,7 @@ def validate_config(cfg: dict) -> None:
             raise InputError("補間節点が不正です。")
     if cfg["anchors"] != [1, 4, 6, 8, 10]:
         raise InputError("採点アンカーが正本と一致しません。")
-    if cfg["rr_good"] != 2 or cfg["rr_conditional"] != 1.5:
+    if cfg["rr_good"] != 2 or cfg["rr_conditional"] != 1.5 or cfg.get("rr_minimum",1.3) != 1.3:
         raise InputError("RR区分は確定要件です。")
     for key in ("atr_period", "rsi_period", "bb_period", "pivot_span", "strong_band"):
         if not isinstance(cfg[key], (int, float)) or cfg[key] <= 0:

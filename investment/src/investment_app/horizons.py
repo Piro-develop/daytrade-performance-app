@@ -35,7 +35,7 @@ def monthly_bars(daily, as_of):
 
 def structure_levels(frame, interval, ref, cfg):
     return [{"id":digest([interval,p])[:16],"low":p["price"],"high":p["price"],
-             "timeframe":interval,"family":"price_structure",
+             "timeframe":interval,"label":("月足" if interval=="1mo" else "週足")+("主要" if p["major"] else "")+("安値・反発帯" if p["kind"]=="low" else "高値"),"family":"price_structure",
              "source":"major_pivot" if p["major"] else "pivot","evidence_ids":[ref]}
             for p in pivots(frame,cfg["pivot_span"],cfg["major_span"])]
 

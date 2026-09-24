@@ -39,6 +39,23 @@ const chartLines=tech=>["weekly","daily"].flatMap(frame=>{
   }).concat(["直近確定"+unit+"足 高値 "+num(last.high)+" / 安値 "+num(last.low)+" / 出来高 "+num(last.volume)]);
 });
 
+const strategyName=p=>p.kind==="現値"?"現値Entry":p.kind;
+const strategySupport=(p,t)=>{
+  const b=(t.bands||[]).find(b=>b.band_id===p.support_id);
+  return {low:p.support_low??b?.low,high:p.support_high??b?.high,basis:p.support_basis?.length?p.support_basis:b?.basis||[]};
+};
+export function entryStrategiesHtml(r) {
+  const plans=r.plans||[];
+  if(!plans.length) return "";
+  return '<section class="j-strategies"><h3>Entry戦略比較</h3><p class="j-muted">押し目は到達時の反転・支持維持を確認する候補です。RR改善だけで買いを意味しません。</p><div class="j-horizons">'+
+    plans.map(p=>{
+      const support=strategySupport(p,r.technical||{});
+      return '<article class="j-mini j-strategy"><h3>'+esc(strategyName(p))+'</h3><p>支持帯 '+num(support.low)+'〜'+num(support.high)+'</p><p>支持根拠：'+esc(support.basis.join("＋")||"旧履歴：詳細根拠の記録なし")+'</p><div class="j-metrics">'+
+        [["Entry","entry"],["第1利確","target1"],["最終利確","target2"],["Alert","alert"],["第1損切","stop1"],["最終損切","stop2"],["RR","rr"]].map(([label,key])=>metric(label,p[key]==null?"該当なし":num(p[key]))).join("")+
+        metric("RR評価",p.rr_evaluation||"旧規則の履歴")+'</div><p>'+esc(publicInvalidation(p,r.technical||{}))+'</p></article>';
+    }).join("")+'</div></section>';
+}
+
 // Explicit allowlist: no raw metadata, account data, Evidence IDs or developer JSON.
 export function buildChatGPTText(results, selectedHorizon="swing", kind="現値") {
   const first=results[selectedHorizon]||Object.values(results)[0];
@@ -69,12 +86,17 @@ export function buildChatGPTText(results, selectedHorizon="swing", kind="現値"
       const bands=(t.bands||[]).filter(filter).sort((a,b)=>Math.abs(Number(a.low)-price)-Math.abs(Number(b.low)-price)).slice(0,3);
       lines.push(name+"："+(bands.map(b=>num(b.low)+"〜"+num(b.high)).join(" / ")||"未確認"));
     }
-    if(p) {
-      lines.push("価格条件："+p.kind+" / 有効期限："+p.expires_at);
+    lines.push("", "### Entry戦略");
+    if(!(r.plans||[]).length) lines.push("価格戦略：未成立");
+    for(const plan of r.plans||[]) {
+      const support=strategySupport(plan,t);
+      lines.push("#### "+strategyName(plan),"支持帯 "+num(support.low)+"〜"+num(support.high),
+        "支持根拠："+(support.basis.join("＋")||"旧履歴：詳細根拠の記録なし"));
       for(const [label,key] of [["Entry候補","entry"],["第1利確","target1"],["最終利確","target2"],
-        ["Alert","alert"],["通常損切","stop1"],["最終損切","stop2"],["RR","rr"]]) lines.push(label+"："+num(p[key]));
-      lines.push("価格構造の無効化："+publicInvalidation(p,t));
-    } else lines.push("価格戦略：未成立");
+        ["Alert","alert"],["通常損切","stop1"],["最終損切","stop2"],["RR","rr"]]) lines.push(label+"："+(plan[key]==null?"該当なし":num(plan[key])));
+      lines.push("RR評価："+(plan.rr_evaluation||"旧規則の履歴"),"価格構造の無効化："+publicInvalidation(plan,t),"有効期限："+plan.expires_at);
+    }
+    if(screen.strategy_summary) lines.push("価格戦略の要約："+screen.strategy_summary);
     lines.push("投資前提崩れ："+((r.metadata.exit_conditions||[]).join(" / ")||"追加調査で具体化が必要"));
     const warnings=(r.findings||[]).map(f=>f.severity+"："+f.reason);
     lines.push("確認事項："+(warnings.join(" / ")||"記録された警告なし"));
@@ -241,6 +263,8 @@ export function createJudgment(root,getUser,getSecurities) {
         ["第1損切",num(p.stop1)],["最終損切",num(p.stop2)],["RR",num(p.rr)],["データ信頼度",num(r.confidence?.value)+" / 100"]
       ].map(([k,v])=>metric(k,v)).join("")+'</div>',
       '<p class="j-concern"><b>最大懸念</b> '+esc(findings[0]?.reason||d.wait_reasons?.[0]||"記録された懸念なし")+'</p>',
+      screen?.strategy_summary?'<p class="j-concern"><b>価格戦略</b> '+esc(screen.strategy_summary)+'</p>':"",
+      entryStrategiesHtml(r),
       (label.startsWith("評価保留")?'<p class="j-muted">価格戦略は取得済み価格からの参考候補です。買い推奨は未確定です。</p>':""),
       (r.metadata.automatic?.current_quote?.observed_at?'<p class="j-muted">株価の観測日時：'+esc(new Date(r.metadata.automatic.current_quote.observed_at).toLocaleString("ja-JP",{timeZone:"Asia/Tokyo"}))+'（日本時間）</p>':""),
       detail("時間軸・価格条件を変更",'<div class="j-grid"><label>表示する時間軸<select id="j-horizon">'+Object.keys(results).map(h=>opt(h,names[h])).join("")+'</select></label>'+

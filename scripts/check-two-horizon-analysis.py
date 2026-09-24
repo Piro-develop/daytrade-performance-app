@@ -1,6 +1,6 @@
 """Read-only live engine verification. No Firebase or personal data is touched."""
 from pathlib import Path
-import json,sys
+import json,sys,argparse,copy,subprocess,types
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'investment/src'))
 from judgment.automatic import acquire
@@ -11,16 +11,52 @@ from test_firestore_judgment import FakeFirestore, store
 from test_production_judgment import call, TestIdentity
 from decimal import Decimal
 
-for code in ('4461','7203'):
+parser=argparse.ArgumentParser()
+parser.add_argument("symbols",nargs="*",default=["4461","7203"])
+parser.add_argument("--compare-entry-base")
+args=parser.parse_args()
+baseline=None
+if args.compare_entry_base:
+    source=subprocess.check_output(["git","show",args.compare_entry_base+":investment/src/investment_app/entry_exit.py"],text=True)
+    baseline=types.ModuleType("investment_app._entry_baseline")
+    exec(compile(source,"baseline_entry_exit.py","exec"),baseline.__dict__)
+
+for code in args.symbols:
     acquired=acquire(code)
     db=FakeFirestore()
     app=create_app(identity=TestIdentity(),store_factory=lambda uid,token:store(db,uid))
-    with patch('judgment.automatic.acquire',return_value=acquired):
+    with patch('judgment.automatic.acquire',side_effect=lambda _:copy.deepcopy(acquired)):
         status,out=call(app,'/api/judgment/automatic','POST','alice',{'symbol':code})
     assert status==200 and db.commits==1
     assert out['saved'] and set(out['results'])=={'swing','midlong'}
     assert not any('5分' in x or 'デイトレ' in x for x in out['missing'])
+    previous=None
+    if baseline:
+        olddb=FakeFirestore()
+        oldapp=create_app(identity=TestIdentity(),store_factory=lambda uid,token:store(olddb,uid))
+        with patch('judgment.automatic.acquire',side_effect=lambda _:copy.deepcopy(acquired)), \
+             patch('investment_app.application.plans_for',baseline.plans_for), \
+             patch('investment_app.horizons.plans_for',baseline.plans_for):
+            oldstatus,previous=call(oldapp,'/api/judgment/automatic','POST','alice',{'symbol':code})
+        assert oldstatus==200
     for horizon,r in out['results'].items():
+        if previous:
+            prior=previous['results'][horizon]
+            old_current=next((p for p in prior['plans'] if p['kind'] in ('現値','指定価格')),None)
+            new_current=next((p for p in r['plans'] if p['kind'] in ('現値','指定価格')),None)
+            assert bool(old_current)==bool(new_current)
+            if old_current:
+                fields=('entry','target1','target2','stop1','stop2','alert','rr','trigger_confirmed')
+                assert {k:old_current[k] for k in fields}=={k:new_current[k] for k in fields}
+            print(json.dumps({'current_plan_unchanged':True,'symbol':code,'horizon':horizon,'as_of':r['as_of']},ensure_ascii=True),flush=True)
+        assert len(r['plans'])<=3
+        pullbacks=[p for p in r['plans'] if p['kind'] in ('第1押し目','第2押し目')]
+        assert len({p['support_id'] for p in pullbacks})==len(pullbacks)
+        for p in pullbacks:
+            assert p['support_basis'] and Decimal(str(p['stop1']))<Decimal(str(p['support_low']))
+            assert Decimal(str(p['entry']))<Decimal(str(r['plans'][0]['entry'])) if r['plans'][0]['kind']=='現値' else True
+        if len(pullbacks)==2: assert Decimal(str(pullbacks[1]['entry']))<Decimal(str(pullbacks[0]['entry']))
+
         saved=store(db).get(r['run_id'])
         assert all(saved[k]==v for k,v in r.items() if k!='presentation')
         assert r['technical']['weekly_count']>=58
@@ -57,5 +93,5 @@ for code in ('4461','7203'):
             'score_gaps':r['metadata']['automatic']['card_gaps'],
             'decisions':{k:{s:v[s] for s in ('label','status','wait_reasons')} for k,v in r['decisions'].items()},
             'scores':{k:{s:v[s] for s in ('structured','context','investment','entry','coverage','entry_coverage','status','entry_status')} for k,v in r['scores'].items()},
-            'plans':[{k:p[k] for k in ('entry','target1','target2','alert','stop1','stop2','rr')} for p in r['plans']],
+            'plans':[{k:p.get(k) for k in ('kind','entry','target1','target2','alert','stop1','stop2','rr','support_low','support_high','support_basis','rr_evaluation')} for p in r['plans']],
             'missing_plan':not bool(r['plans'])},ensure_ascii=True),flush=True)

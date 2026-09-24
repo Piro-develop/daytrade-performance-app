@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import {buildChatGPTText} from "../judgment.mjs";
+import {buildChatGPTText,entryStrategiesHtml} from "../judgment.mjs";
 const r={
  symbol:"4461",name:"第一工業製薬",as_of:"2026-09-22T10:00:00+09:00",
  metadata:{secret:"PRIVATE_TEST",exit_conditions:["会社計画撤回時に再評価"],screening:{label:"要確認",daily_state:"混在",
@@ -19,3 +19,14 @@ for(const forbidden of ["PRIVATE_TEST","PRIVATE_REF","INTERNAL_SUPPORT_ID","INTE
  assert.ok(!out.includes(forbidden),forbidden);
 assert.equal(buildChatGPTText({swing:{metadata:{}}}),"");
 console.log("ChatGPT copy: required data present, internal IDs and private fields excluded");
+
+r.plans.push({...r.plans[0],kind:"第1押し目",entry:85,stop1:79,target1:100,rr:2.5,support_low:80,support_high:85,support_basis:["25日線","直近安値"],rr_evaluation:"良好"},
+ {...r.plans[0],kind:"第2押し目",entry:70,stop1:65,target1:79,rr:1.8,support_low:66,support_high:70,support_basis:["13週線","過去反発帯"],rr_evaluation:"許容"});
+const comparison=buildChatGPTText({swing:r});
+const html=entryStrategiesHtml(r);
+for(const label of ["現値Entry","第1押し目","第2押し目","25日線","13週線","良好","許容"]) {
+ assert.ok(comparison.includes(label),label);assert.ok(html.includes(label),label);
+}
+assert.ok(!comparison.includes("INTERNAL_SUPPORT_ID"));
+assert.ok(!html.includes("INTERNAL_SUPPORT_ID"));
+console.log("All available Entry scenarios appear in copy and comparison UI");

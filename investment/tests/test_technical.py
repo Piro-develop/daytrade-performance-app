@@ -40,17 +40,18 @@ def test_rr_formula_and_improvement_fixed_stop():
 
 def test_rr_boundaries_not_hard_cutoff():
     cfg=load_config()
-    assert rr_bucket(Decimal("1.4999"),cfg)=="Entry改善"
-    assert rr_bucket(Decimal("1.5"),cfg)=="条件付き"
-    assert rr_bucket(Decimal("1.9999"),cfg)=="条件付き"
+    assert rr_bucket(Decimal("1.4999"),cfg)=="最低限／要確認"
+    assert rr_bucket(Decimal("1.5"),cfg)=="許容"
+    assert rr_bucket(Decimal("1.9999"),cfg)=="許容"
     assert rr_bucket(Decimal("2"),cfg)=="良好"
 
 def test_same_family_not_inflated():
     cfg=load_config()
-    level={"id":"a","low":105,"high":105,"timeframe":"1w","family":"moving_average","source":"ma","evidence_ids":["e"]}
+    level={"id":"a","low":105,"high":105,"timeframe":"1w","family":"moving_average","source":"ma","label":"13週線","evidence_ids":["e"]}
     one=cluster_levels([level],frame(10),1,1,cfg)[0]
     many=cluster_levels([dict(level,id=str(n)) for n in range(10)],frame(10),1,1,cfg)[0]
     assert one.strength==many.strength
+    assert one.basis==many.basis==("13週線",)
 
 def test_friday_close_is_a_complete_week():
     data=frame(8)

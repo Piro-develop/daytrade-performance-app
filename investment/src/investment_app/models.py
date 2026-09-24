@@ -127,6 +127,7 @@ class Band:
     evidence_ids: tuple[str, ...]
     primary: bool
     reactions: int
+    basis: tuple[str, ...] = ()
 
 @dataclass(frozen=True)
 class EntryPlan:
@@ -146,6 +147,10 @@ class EntryPlan:
     expires_at: str
     trigger_confirmed: bool
     rr_reason: str = ""
+    support_low: float | None = None
+    support_high: float | None = None
+    support_basis: tuple[str, ...] = ()
+    rr_evaluation: str = ""
 
 @dataclass
 class ScoreResult:

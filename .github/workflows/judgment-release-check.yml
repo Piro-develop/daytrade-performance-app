@@ -22,14 +22,15 @@ jobs:
         env:
           PYTHONPATH: .:investment/src
         run: |
-          python -m pytest investment/tests/test_automatic_judgment.py investment/tests/test_automatic_assessment.py investment/tests/test_price_sources.py investment/tests/test_two_horizons.py investment/tests/test_firestore_judgment.py investment/tests/test_production_judgment.py investment/tests/test_approval.py investment/tests/test_decision.py -q
+          python -m pytest investment/tests/test_automatic_judgment.py investment/tests/test_automatic_assessment.py investment/tests/test_price_sources.py investment/tests/test_two_horizons.py investment/tests/test_firestore_judgment.py investment/tests/test_production_judgment.py investment/tests/test_approval.py investment/tests/test_decision.py investment/tests/test_entry_strategies.py investment/tests/test_technical.py -q
           node --check judgment.mjs
           node scripts/check-screening-copy.mjs
-      - name: Check actual public prices for 4461 and 7203
+      - name: Compare actual Entry strategies for 4461 and 9449
         run: |
           python scripts/check-price-acquisition.py
           python scripts/check-price-acquisition.py --fallback
-          python scripts/check-two-horizon-analysis.py
+          git fetch --no-tags --depth=1 origin 740a4543cc629d4bd1c84a49ca0782c786467c9b
+          python scripts/check-two-horizon-analysis.py 4461 9449 --compare-entry-base 740a4543cc629d4bd1c84a49ca0782c786467c9b
       - name: Build production container
         run: docker build -t judgment-api .
       - name: Check production startup and authentication boundary

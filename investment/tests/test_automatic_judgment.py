@@ -118,6 +118,11 @@ def test_screening_uses_risk_and_structure_not_missing_qualitative():
     assert label()=="通過"
     plan.rr=Decimal("1")
     assert label()=="要確認" # Low RR alone never rejects the stock.
+    from investment_app.screening import strategy_summary
+    pull=SimpleNamespace(kind="第1押し目",entry=900,rr=Decimal("1.7"),trigger_confirmed=False)
+    assert "第1押し目" in strategy_summary([plan,pull],cfg)
+    assert "1.70" in strategy_summary([plan,pull],cfg)
+    assert classify(tech,[plan,pull],scores,[],earnings,{},cfg)[0]=="要確認"
     plan.rr=Decimal("2")
     scores["現値"].coverage=.05
     assert label()=="要確認"

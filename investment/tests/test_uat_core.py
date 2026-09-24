@@ -37,16 +37,16 @@ def test_midlong_stress_missing_and_separation(source):
     assert all(l["timeframe"] in ("1w","1mo") for l in t["levels"])
 
 
-def test_two_horizon_atomic_storage_and_unchanged_stops(source,tmp_path):
+def test_two_horizon_atomic_storage_and_structural_stops(source,tmp_path):
     db=History(tmp_path/"runs.sqlite")
     results=run_all(source,db)
     assert len(db.list_runs())==2
     for r in results.values():
         restored=db.get(r["run_id"])
         assert canonical(restored)==canonical(r)
-        if len(r["plans"])>1:
-            a,b=r["plans"][:2]
-            assert a["stop1"]==b["stop1"] and a["target1"]==b["target1"]
+        for plan in r["plans"]:
+            assert float(plan["stop1"])<float(plan["support_low"])
+            assert float(plan["target1"])>float(plan["entry"])
         for d in r["decisions"].values():
             assert set(d["evidence_ids"]).issubset(r["evidence"])
     with pytest.raises(Exception):

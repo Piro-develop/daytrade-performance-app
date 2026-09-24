@@ -65,13 +65,13 @@ def test_no_calendar_no_fake_business_days():
     assert out.earnings["business_days"] is None
     assert any(x.code=="calendar_missing" for x in out.findings)
 
-def test_future_entry_retains_both_exit_prices():
+def test_future_entries_follow_their_own_supports():
     out,_,_=result()
-    if len(out.plans)>1:
-        assert out.plans[0].stop1==out.plans[1].stop1
-        assert out.plans[0].target1==out.plans[1].target1
-        assert out.plans[1].rr>out.plans[0].rr
-        assert out.scores[out.plans[1].kind].entry is None
+    for p in out.plans[1:]:
+        assert p.stop1<float(p.support_low)<=float(p.support_high)<=p.entry
+        assert p.target1>p.entry and p.rr==(p.target1-p.entry)/(p.entry-p.stop1)
+        assert out.scores[p.kind].entry is None
+
 
 def test_unknown_macro_is_not_neutral_context():
     out,_,_=result(mutate=lambda m:m.pop("macro"))

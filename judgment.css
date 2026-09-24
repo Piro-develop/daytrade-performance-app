@@ -72,3 +72,5 @@
 .judgment #j-analyze{width:100%;min-height:48px}
 
 .j-result{scroll-margin-top:16px}
+
+.j-strategy .j-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}

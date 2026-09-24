@@ -104,7 +104,8 @@ def cluster_levels(levels: list[dict], daily: pd.DataFrame, atr: float | None,
                     + recency + cfg["family_bonus"] * min(max(0,len(family_strength)-1),cfg["family_bonus_cap"]))
         refs = tuple(sorted({r for x in group for r in x["evidence_ids"]}))
         primary = any(x["timeframe"] == "1w" or x["source"] in {"major_pivot","volume_profile"} for x in group)
-        bands.append(Band(digest(group)[:16], low, high, strength, tuple(sorted(family_strength)), refs, primary, reactions))
+        bands.append(Band(digest(group)[:16], low, high, strength, tuple(sorted(family_strength)), refs, primary, reactions,
+            tuple(sorted({x.get("label") or ("週足" if x["timeframe"]=="1w" else "日足") + "価格構造" for x in group}))))
     return sorted(bands, key=lambda b:b.low)
 
 def compute(bundle: Bundle, cfg: dict) -> dict:
@@ -127,7 +128,14 @@ def compute(bundle: Bundle, cfg: dict) -> dict:
     def add(price, timeframe, family, source, refs, token, high=None):
         if number(price) is None or price <= 0:
             return
-        levels.append({"id":digest([token,price,timeframe])[:16], "low":float(price),
+        unit="週" if timeframe=="1w" else "日"
+        label=(token[2:]+unit+"線" if source=="ma" else
+               unit+"足"+("主要" if source=="major_pivot" else "")+("安値・反発帯" if token.endswith("low") else "高値") if source in ("pivot","major_pivot") else
+               unit+"足の窓" if source=="gap" else
+               unit+"足BB"+("上限" if token=="bb_upper" else "下限") if source=="bb" else
+               unit+"足フィボナッチ "+token if source=="fib" else
+               "ラウンドナンバー "+token if source=="round_number" else "実測出来高帯")
+        levels.append({"id":digest([token,price,timeframe])[:16], "label":label, "low":float(price),
                        "high":float(high if high is not None else price),"timeframe":timeframe,
                        "family":family,"source":source,"evidence_ids":list(refs)})
     for interval, data, periods in [("1d",daily,cfg["daily_ma"]),("1w",weekly,cfg["weekly_ma"])]:
