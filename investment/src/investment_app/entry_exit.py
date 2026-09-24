@@ -85,8 +85,9 @@ def plans_for(bundle: Bundle, technical: dict, cfg: dict, specified_entry=None) 
         bounce=len(daily)>1 and daily.iloc[-2].low<=support.high and daily.iloc[-1].close>support.high
         breaking=len(daily)>1 and any(daily.iloc[-2].close<=b.high<daily.iloc[-1].close for b in strong if b.band_id!=support.band_id)
         retest=len(daily)>1 and daily.iloc[-2].close>support.high and daily.iloc[-1].low<=support.high and daily.iloc[-1].close>=support.high
-        kind="指定価格" if specified_entry is not None and current!=market else "現値"
-        first=build(current,support,kind,bool(kind=="現値" and (bounce or breaking or retest)))
+        public_quote=bundle.metadata.get("automatic",{}).get("entry_source")=="public_quote"
+        kind="指定価格" if specified_entry is not None and current!=market and not public_quote else "現値"
+        first=build(current,support,kind,bool(kind=="現値" and current==market and (bounce or breaking or retest)))
         if first: plans.append(first)
 
     # Disjoint clusters, nearest first. No RR-target search or isolated MA selection.

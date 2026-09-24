@@ -57,3 +57,13 @@ def test_missing_current_target_does_not_hide_valid_deeper_plan_or_invent_one():
     assert rr_bucket(Decimal("1.3"),c)=="最低限／要確認"
     assert rr_bucket(Decimal("1.5"),c)=="許容"
     assert rr_bucket(Decimal("2"),c)=="良好"
+
+def test_live_quote_is_current_price_but_never_invents_closed_bar_trigger():
+    b,t,c=inputs()
+    b.metadata["automatic"]={"entry_source":"public_quote"}
+    current=plans_for(b,t,c,specified_entry=1050)[0]
+    assert current.kind=="現値" and current.entry==1050 and not current.trigger_confirmed
+    b.metadata["automatic"]["entry_source"]="user"
+    specified=plans_for(b,t,c,specified_entry=1050)[0]
+    assert specified.kind=="指定価格"
+    assert (current.entry,current.stop1,current.target1,current.rr)==(specified.entry,specified.stop1,specified.target1,specified.rr)
