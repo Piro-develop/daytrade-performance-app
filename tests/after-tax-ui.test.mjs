@@ -26,7 +26,7 @@ test("売買記録は累計・期間・各売却の税引後を主表示する",
   assert.match(records, /全期間の累計税引後損益/);
   assert.match(records, /期間別の税引後損益/);
   assert.match(records, /afterTaxTotalForTrades\(completed/);
-  assert.match(records, /afterTaxTotalForTrades\(selectedTrades/);
+  assert.match(records, /afterTaxTotalForTrades\(recordSales/);
   assert.match(records, /const afterTaxProfit = trade\.realisedProfit === null \? null : afterTaxProfitOf\(trade\)/);
   assert.match(records, /class="record-entry-result"/);
   assert.match(records, /（税引前 \$\{yen\(trade\.realisedProfit\)\}）/);

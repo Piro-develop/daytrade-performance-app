@@ -493,6 +493,7 @@ function monthOptions() {
 }
 
 function pnlRange(period) {
+  if (period === "all") return { start: "0000-00-00", end: "9999-12-31", label: "全期間" };
   const selection = state.pnlSelections[period];
   if (period === "day") {
     const date = parseLocalDate(selection);
@@ -543,7 +544,9 @@ function renderRecordSearchOptions() {
 
 function renderRecordSearchResults(ledger) {
   const candidatesByCode = new Map(recordSecurityCandidates().map((candidate) => [candidate.code, candidate]));
-  const records = [...ledger.calculated].filter((trade) => {
+  const period = pnlRange(state.pnlPeriod);
+  const filteredTrades = ledger.calculated.filter((trade) => state.pnlPeriod === "all" || (trade.date >= period.start && trade.date <= period.end));
+  const records = filteredTrades.filter((trade) => {
     if (state.recordSecurityCode) return String(trade.code ?? "") === state.recordSecurityCode;
     const candidate = candidatesByCode.get(String(trade.code ?? ""));
     return securityMatchesSearch({ code: trade.code, name: trade.name, reading: candidate?.reading ?? "", aliases: candidate?.aliases ?? [] }, state.recordQuery);
@@ -560,6 +563,13 @@ function renderRecordSearchResults(ledger) {
   const recordSales = records.filter((trade) => trade.action === "売却" && trade.realisedProfit !== null);
   const recordTaxBefore = recordSales.reduce((sum, trade) => sum + trade.realisedProfit, 0);
   const recordPnl = afterTaxTotalForTrades(recordSales);
+  const periodProfit = $("#record-period-profit");
+  const periodTaxBefore = $("#record-period-tax-before");
+  if (periodProfit) {
+    periodProfit.textContent = yen(recordPnl);
+    periodProfit.className = recordPnl >= 0 ? "positive" : "negative";
+  }
+  if (periodTaxBefore) periodTaxBefore.textContent = `（税引前 ${yen(recordTaxBefore)}）`;
   const summary = $("#record-result-summary");
   const groups = $("#record-groups");
   if (!summary || !groups) return;
@@ -572,23 +582,20 @@ function renderRecordSearchResults(ledger) {
     const priceLabel = trade.action === "買付" ? "買付価格" : "売却価格";
     const allocationStatus = trade.action === "売却" && accountTypeOf(trade) === "信用" && !trade.allocationConfirmed ? " ・ 返済建玉未確認" : "";
     return `<div class="record-entry"><button class="record-entry-main" data-action="edit" data-id="${esc(trade.id)}" type="button"><span class="record-security"><strong>${esc(trade.code)}</strong><span>${esc(trade.name)}</span></span><span class="record-entry-meta"><span>${esc(accountDetailLabel(trade))}${allocationStatus}</span><span>${priceLabel} ${yen(trade.price, false)}</span></span><span class="record-entry-result"><strong class="${resultClass}">${result}</strong>${taxBefore}</span><span class="record-chevron">›</span></button></div>`;
-  }).join("")}</div></section>`).join("") || `<div class="empty-state">該当する売買はありません</div>`;
+  }).join("")}</div></section>`).join("") || `<div class="empty-state">${state.recordQuery || state.recordSecurityCode ? "この期間に検索条件に一致する取引はありません" : "この期間の取引はありません"}</div>`;
 }
 
 function renderRecords(ledger) {
   const completed = ledger.calculated.filter((trade) => trade.action === "売却" && trade.realisedProfit !== null);
   const period = pnlRange(state.pnlPeriod);
-  const selectedTrades = completed.filter((trade) => trade.date >= period.start && trade.date <= period.end);
   const totalTaxBefore = completed.reduce((sum, trade) => sum + trade.realisedProfit, 0);
-  const selectedTaxBefore = selectedTrades.reduce((sum, trade) => sum + trade.realisedProfit, 0);
   const totalPnl = afterTaxTotalForTrades(completed);
-  const selectedPnl = afterTaxTotalForTrades(selectedTrades);
   $("#records-view").innerHTML = `
     <div class="pnl-overview">
       <article class="pnl-card"><div><p class="section-kicker">TOTAL PROFIT / LOSS</p><h2>全期間の累計税引後損益</h2></div><strong class="${totalPnl >= 0 ? "positive" : "negative"}">${yen(totalPnl)}</strong><small class="tax-before-secondary">（税引前 ${yen(totalTaxBefore)}）</small><small>SBI実績を優先・未入力分は年間損益通算による概算</small></article>
-      <article class="pnl-card"><div class="pnl-card-heading"><div><p class="section-kicker">PERIOD PROFIT / LOSS</p><h2>期間別の税引後損益</h2></div><div class="pnl-period-switch">${[["day","一日"],["week","週間"],["month","月間"]].map(([value,label]) => `<button class="${state.pnlPeriod === value ? "active" : ""}" data-action="pnl-period" data-period="${value}" type="button">${label}</button>`).join("")}</div></div>
-      <div class="pnl-period-selector">${pnlPeriodSelector(state.pnlPeriod)}</div>
-      <strong class="${selectedPnl >= 0 ? "positive" : "negative"}">${yen(selectedPnl)}</strong><small class="tax-before-secondary">（税引前 ${yen(selectedTaxBefore)}）</small><small>${period.label} ・ SBI実績を優先・未入力分は概算</small></article>
+      <article class="pnl-card"><div class="pnl-card-heading"><div><p class="section-kicker">PERIOD PROFIT / LOSS</p><h2>期間別の税引後損益</h2></div><div class="pnl-period-switch">${[["all","全期間"],["day","一日"],["week","週間"],["month","月間"]].map(([value,label]) => `<button class="${state.pnlPeriod === value ? "active" : ""}" data-action="pnl-period" data-period="${value}" type="button">${label}</button>`).join("")}</div></div>
+      ${state.pnlPeriod === "all" ? "" : `<div class="pnl-period-selector">${pnlPeriodSelector(state.pnlPeriod)}</div>`}
+      <strong id="record-period-profit" class="positive">${yen(0)}</strong><small id="record-period-tax-before" class="tax-before-secondary">（税引前 ${yen(0)}）</small><small>${period.label} ・ SBI実績を優先・未入力分は概算</small></article>
     </div>
     <div class="view-panel records-list-panel"><div class="records-toolbar"><div class="record-search-wrap"><label class="search-field">⌕<input id="record-search" class="keyboard-safe-input" value="${esc(state.recordQuery)}" autocomplete="off" aria-autocomplete="list" aria-controls="record-search-options" aria-expanded="false" placeholder="銘柄コード・銘柄名で検索"></label><div id="record-search-options" class="security-options record-search-options hidden" role="listbox"></div></div><div id="record-result-summary" class="record-summary"></div></div>
     <div id="record-groups" class="record-groups"></div></div>`;
