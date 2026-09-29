@@ -342,6 +342,11 @@ function statsFor(completed) {
   const afterTaxValues = completed.map(afterTaxProfitOf);
   const afterTaxWins = afterTaxValues.filter((profit) => profit > 0);
   const afterTaxLosses = afterTaxValues.filter((profit) => profit < 0);
+  const afterTaxProfitTotal = afterTaxWins.reduce((sum, profit) => sum + profit, 0);
+  const afterTaxLossTotal = afterTaxLosses.reduce((sum, profit) => sum + profit, 0);
+  const ordered = [...completed].sort(byTimeAsc);
+  const maxProfitTrade = ordered.reduce((best, trade) => afterTaxProfitOf(trade) > (best ? afterTaxProfitOf(best) : 0) ? trade : best, null);
+  const maxLossTrade = ordered.reduce((best, trade) => afterTaxProfitOf(trade) < (best ? afterTaxProfitOf(best) : 0) ? trade : best, null);
   let total = 0, peak = 0, maxDrawdown = 0;
   [...completed].sort(byTimeAsc).forEach((trade) => {
     total += trade.realisedProfit;
@@ -350,6 +355,12 @@ function statsFor(completed) {
   });
   return {
     profit: grossProfit - grossLoss,
+    grossProfit,
+    grossLoss: -grossLoss,
+    afterTaxProfitTotal,
+    afterTaxLossTotal,
+    maxProfitTrade,
+    maxLossTrade,
     taxReference: afterTaxTotalForTrades(completed),
     winRate: completed.length ? wins.length / completed.length * 100 : 0,
     winCount: wins.length,
@@ -358,8 +369,8 @@ function statsFor(completed) {
     averageLoss: losses.length ? -grossLoss / losses.length : 0,
     maxProfit: wins.length ? Math.max(...wins.map((trade) => trade.realisedProfit)) : 0,
     maxLoss: losses.length ? Math.min(...losses.map((trade) => trade.realisedProfit)) : 0,
-    afterTaxAverageProfit: afterTaxWins.length ? afterTaxWins.reduce((sum, profit) => sum + profit, 0) / afterTaxWins.length : 0,
-    afterTaxAverageLoss: afterTaxLosses.length ? afterTaxLosses.reduce((sum, profit) => sum + profit, 0) / afterTaxLosses.length : 0,
+    afterTaxAverageProfit: afterTaxWins.length ? afterTaxProfitTotal / afterTaxWins.length : 0,
+    afterTaxAverageLoss: afterTaxLosses.length ? afterTaxLossTotal / afterTaxLosses.length : 0,
     afterTaxMaxProfit: afterTaxWins.length ? Math.max(...afterTaxWins) : 0,
     afterTaxMaxLoss: afterTaxLosses.length ? Math.min(...afterTaxLosses) : 0,
     pf: grossLoss ? grossProfit / grossLoss : grossProfit ? Infinity : 0,
@@ -408,7 +419,11 @@ function renderOverview(ledger, completed, stats) {
   const winSummary = styleSummary.map(([label, item]) => `<div class="summary-breakdown-row"><span>${label}：</span><span class="summary-breakdown-values"><strong class="${item.saleCount ? "positive" : "muted"}">${item.winRate.toFixed(1)}%</strong><small>(${item.winCount}/${item.saleCount})</small></span></div>`).join("");
   const metricYen = (value) => value === 0 ? "± 0円" : yen(value);
   const metricClass = (value) => value > 0 ? "positive" : value < 0 ? "negative" : "muted";
-  const metricCard = (label, icon, value, note, className = "", secondary = "") => `<article class="stat-card compact-stat"><div class="stat-top"><span>${label}</span><i>${icon}</i></div><strong class="${className}">${value}</strong><small>${note}</small>${secondary ? `<small class="tax-before-secondary">${secondary}</small>` : ""}</article>`;
+  const metricCard = (label, icon, value, note, className = "", secondary = "", trade = null) => {
+    const tag = trade ? "button" : "article";
+    const link = trade ? ` type="button" data-action="view-record-trade" data-id="${esc(trade.id)}" aria-label="${label}の対象取引を見る"` : "";
+    return `<${tag} class="stat-card compact-stat${trade ? " stat-card-link" : ""}"${link}><span class="stat-top"><span>${label}</span><i aria-hidden="true">${icon}</i></span><strong class="${className}">${value}</strong><small>${note}</small>${secondary ? `<small class="tax-before-secondary">${secondary}</small>` : ""}${trade ? `<small class="stat-link-hint">対象取引を見る ›</small>` : ""}</${tag}>`;
+  };
   const periodLabels = { day: "一日", week: "週間", month: "月間", all: "全期間" };
   const styleLabels = { all: "全て", デイトレ: "デイトレ", スイング: "スイング" };
   const accountLabels = { all: "全て", 現物: "現物", 信用: "信用" };
@@ -425,10 +440,12 @@ function renderOverview(ledger, completed, stats) {
     <div class="stats-grid summary-stats-grid">
       <article class="stat-card breakdown-card"><div class="stat-top"><span>税引後損益</span><i>円</i></div><div class="summary-breakdown">${profitSummary}</div><small class="profit-tax-note">SBI実績を優先・未入力分は概算／（）内は税引前損益</small></article>
       <article class="stat-card breakdown-card"><div class="stat-top"><span>勝率</span><i>◎</i></div><div class="summary-breakdown">${winSummary}</div></article>
+      ${metricCard("利益合計", "＋", metricYen(stats.afterTaxProfitTotal), "税引後・利益取引の合計", metricClass(stats.afterTaxProfitTotal), `（税引前 ${metricYen(stats.grossProfit)}）`)}
+      ${metricCard("損失合計", "−", metricYen(stats.afterTaxLossTotal), "税引後・損失取引の合計", metricClass(stats.afterTaxLossTotal), `（税引前 ${metricYen(stats.grossLoss)}）`)}
       ${metricCard("平均利益", "＋", metricYen(stats.afterTaxAverageProfit), "税引後・利益取引の平均", metricClass(stats.afterTaxAverageProfit), `（税引前 ${metricYen(stats.averageProfit)}）`)}
       ${metricCard("平均損失", "−", metricYen(stats.afterTaxAverageLoss), "税引後・損失取引の平均", metricClass(stats.afterTaxAverageLoss), `（税引前 ${metricYen(stats.averageLoss)}）`)}
-      ${metricCard("最大利益", "↑", metricYen(stats.afterTaxMaxProfit), "税引後・1取引の最大利益", metricClass(stats.afterTaxMaxProfit), `（税引前 ${metricYen(stats.maxProfit)}）`)}
-      ${metricCard("最大損失", "↓", metricYen(stats.afterTaxMaxLoss), "税引後・1取引の最大損失", metricClass(stats.afterTaxMaxLoss), `（税引前 ${metricYen(stats.maxLoss)}）`)}
+      ${metricCard("最大利益", "↑", metricYen(stats.afterTaxMaxProfit), "税引後・1取引の最大利益", metricClass(stats.afterTaxMaxProfit), `（税引前 ${metricYen(stats.maxProfitTrade?.realisedProfit ?? 0)}）`, stats.maxProfitTrade)}
+      ${metricCard("最大損失", "↓", metricYen(stats.afterTaxMaxLoss), "税引後・1取引の最大損失", metricClass(stats.afterTaxMaxLoss), `（税引前 ${metricYen(stats.maxLossTrade?.realisedProfit ?? 0)}）`, stats.maxLossTrade)}
     </div>
     <div class="dashboard-grid">
       <article class="panel"><div class="panel-heading"><div><p class="section-kicker">PERFORMANCE</p><h2>累積税引後損益</h2></div><span class="period-badge">${filterLabel}</span></div><div class="chart-wrap">${chartSvg(completed)}</div></article>
@@ -644,6 +661,27 @@ function switchView(view) {
   $("#open-buy").classList.toggle("hidden", view === "settings" || view === "investment");
   if (view === "investment") judgment.open();
   if (changed) requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: "auto" }));
+}
+
+function openRecordTrade(id) {
+  const ledger = calculateLedger(state.trades);
+  if (!ledger.calculated.some((trade) => trade.id === id)) {
+    showToast("対象の取引が見つかりませんでした");
+    return;
+  }
+  state.pnlPeriod = "all";
+  state.recordQuery = "";
+  state.recordSecurityCode = null;
+  renderRecords(ledger);
+  switchView("records");
+  requestAnimationFrame(() => {
+    if (state.activeView !== "records") return;
+    const entry = $$("#record-groups [data-action='edit']").find((button) => button.dataset.id === id);
+    if (!entry) return;
+    entry.classList.add("record-entry-highlight");
+    entry.focus({ preventScroll: true });
+    entry.scrollIntoView({ block: "center", behavior: "auto" });
+  });
 }
 
 function closePositionLotModal() {
@@ -1355,6 +1393,7 @@ document.addEventListener("click", async (event) => {
     return;
   }
   if (action === "view-records") switchView("records");
+  if (action === "view-record-trade") { openRecordTrade(target.dataset.id); return; }
   if (action === "open-position-buys") { openPositionBuyEditor(target.dataset.code, target.dataset.accountType); return; }
   if (action === "close-position-lots") { closePositionLotModal(); return; }
   if (action === "edit-position-lot") { const trade = state.trades.find((item) => item.id === target.dataset.id); if (trade) { closePositionLotModal(); openBuy(trade); } return; }

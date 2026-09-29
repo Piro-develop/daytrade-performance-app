@@ -32,7 +32,7 @@ test("実現損益は税引後を主表示、税引前を括弧内へ表示す�
   assert.match(overviewSource, /class="profit-tax-note">SBI実績を優先・未入力分は概算／（）内は税引前損益<\/small>/);
   assert.doesNotMatch(overviewSource, /metricCard\("PF"|metricCard\("最大DD"/);
   assert.match(styles, /\.profit-tax-note\s*\{[^}]*white-space:\s*nowrap;/s);
-  assert.match(styles, /\.summary-stats-grid\s*\{[^}]*grid-template-columns:\s*repeat\(3,minmax\(0,1fr\)\)/s);
+  assert.match(styles, /\.summary-stats-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,minmax\(0,1fr\)\)/s);
 });
 
 test("現物買付では手数料欄を隠し、現物売却だけ表示する", () => {
