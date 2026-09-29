@@ -154,6 +154,7 @@ class EntryPlan:
     first_target_upside_pct: Decimal | None = None
     eligible: bool | None = None
     entry_reason: str = ""
+    generation_routes: tuple[str, ...] = ()
 
 @dataclass
 class ScoreResult:

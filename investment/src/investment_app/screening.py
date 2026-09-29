@@ -7,7 +7,7 @@ from .horizons import horizon_cards
 from .preflight import confidence
 from .entry_exit import entry_is_eligible, entry_eligibility
 
-VERSION="screening-1.3.0"
+VERSION="screening-1.4.0"
 # Original card weights, restricted to the explicitly defined objective universe.
 WEIGHTS={
     "swing":{"SW-A3":4,"SW-D1":4.9,"SW-D2":4.2,"SW-D3":2.8,"SW-D4":2.1,
@@ -70,12 +70,12 @@ def followup(bundle):
 def strategy_summary(plans,cfg):
     valid=[p for p in plans if entry_is_eligible(p,cfg)]
     if not valid:
-        return f"見送り。現在値から{cfg['pullback_search']*100:g}%以内の現実的な支持帯では、第1利確まで5%以上かつRR1.3以上を満たす有効なEntry候補がありません。"
+        return f"見送り。現在値から{cfg['pullback_search']*100:g}%以内の現実的な支持帯では、第1主要抵抗まで5%以上の上昇余地を確保できる有効なEntry候補がありません。"
     return "有効なEntry候補："+"、".join(p.kind for p in valid)+"。到達・反転確認が必要です。"
 
 
 def classify(tech, plans, scores, findings, earnings, facts, cfg):
-    hard=[f.reason for f in findings if f.severity==Severity.CRITICAL]
+    hard=[f.reason for f in findings if f.severity==Severity.CRITICAL and f.code!="plan_missing"]
     cur=facts.get('financial',{}).get('current',{})
     deteriorating=((cur.get('sales_yoy') is not None and cur.get('operating_yoy') is not None
         and cur['sales_yoy']<0 and cur['operating_yoy']<0) or
@@ -94,11 +94,11 @@ def classify(tech, plans, scores, findings, earnings, facts, cfg):
     if not plans: review.append("価格戦略に必要な情報を追加確認")
     else:
         immediate=next((p for p in plans if p.kind in ("現値","指定価格")),None)
-        if immediate is None or not entry_is_eligible(immediate,cfg) or immediate.rr<Decimal(str(cfg['rr_conditional'])):
+        if immediate is None or not entry_is_eligible(immediate,cfg):
             review.append(strategy_summary(plans,cfg))
     if current.entry is None or current.entry_coverage<cfg['coverage_normal']: review.append("Entryの確認範囲が限定的")
     if weekly!='上昇' or daily!='上昇': review.append("週足・日足の方向が混在、またはトレンドの追加確認が必要")
-    if not any(p.kind=='現値' and p.trigger_confirmed and entry_is_eligible(p,cfg) and p.rr>=Decimal(str(cfg.get('rr_minimum',1.3))) for p in plans): review.append("Entryトリガーまたは改善Entryの到達を確認")
+    if not any(p.kind=='現値' and p.trigger_confirmed and entry_is_eligible(p,cfg) for p in plans): review.append("Entryトリガーまたは改善Entryの到達を確認")
     if earnings['state']=='unknown': review.append("決算予定未確認")
     if review: return "要確認",list(dict.fromkeys(review)),daily
     return "通過",["客観条件上、詳しく調べる候補。買い判断ではありません。"],daily
@@ -110,8 +110,7 @@ def apply_screening(result,bundle,cfg):
     objective=set(weights)
     # Missing research is routed to ChatGPT, not to a final-investment gate.
     result.findings=[f for f in result.findings if f.code not in ('unchecked_negative_news','unchecked_thesis')]
-    missing_codes={'financial_missing','weekly_missing','tick_missing','warning_unverified','warning_severity'}
-    if result.technical.get('weekly_count',0)<cfg['weekly_min'] or any(f.code=='tick_missing' for f in result.findings): missing_codes.add('plan_missing')
+    missing_codes={'plan_missing','financial_missing','weekly_missing','tick_missing','warning_unverified','warning_severity'}
     result.findings=[replace(f,severity=Severity.WARNING) if f.code in missing_codes else f for f in result.findings]
     result.findings=[replace(f,reason="採用資料に期限外・鮮度未確認の根拠があります。更新時点を追加確認してください。")
         if f.code=='evidence_freshness' else f for f in result.findings]
@@ -149,8 +148,10 @@ def apply_screening(result,bundle,cfg):
             scenario_reasons.insert(0,strategy_summary(result.plans,cfg))
         result.decisions[scenario]=Decision(scenario_label,state,None,[],scenario_reasons,result.findings,[],refs,bool(severe),
             bool(severe and complete and plan and entry_is_eligible(plan,cfg) and result.scores[kind].entry is not None and label!='非通過' and state!=EvaluationStatus.UNAVAILABLE))
+    uncovered=[cards[code]['label']+('（一部未評価）' if first.items.get(code,{}).get('score') is not None else '')
+        for code in weights if first.items.get(code,{}).get('score') is None or first.items[code].get('coverage',1)<1]
     result.metadata.update(evaluation_policy=VERSION,screening={'version':VERSION,'label':label,'reasons':reasons,
         'daily_state':daily,'pullback_search':cfg['pullback_search'],'price_strategy_status':'候補あり' if any(entry_is_eligible(p,cfg) for p in result.plans) else '見送り','strategy_summary':strategy_summary(result.plans,cfg),'facts':objective_summary(bundle),'chatgpt_checks':followup(bundle),
-        'weights':weights,'meaning':'詳しく調べる価値の一次判定。最終投資妙味・買い判断ではありません。'})
+        'uncovered_objective':uncovered,'weights':weights,'meaning':'詳しく調べる価値の一次判定。最終投資妙味・買い判断ではありません。'})
     cfg['screening_policy']={'version':VERSION,'weights':WEIGHTS}
     result.config_version+=':'+VERSION;result.config_hash=digest(cfg)

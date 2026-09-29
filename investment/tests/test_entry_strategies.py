@@ -25,7 +25,7 @@ def inputs():
     return bundle,tech,cfg
 
 
-def test_independent_pullbacks_keep_current_prices_and_stop_first():
+def test_independent_pullbacks_keep_prices_and_structural_stop():
     b,t,c=inputs()
     current,first,second=plans_for(b,t,c)
     assert (current.entry,current.stop1,current.stop2,current.target1,current.target2)==(1000,948,878,1099,1199)
@@ -78,7 +78,10 @@ def test_minimum_upside_A_B_and_inclusive_boundary():
     assert b.first_target_upside_pct==6 and b.rr==2 and b.eligible
     assert make_plan(1000,1050,990).eligible
     assert not make_plan(1000,Decimal("1049.9"),990).eligible
-    assert not make_plan(1000,1060,900).eligible
+    assert make_plan(1000,1060,900).eligible
+    low_rr=make_plan(1000,1060,940)
+    assert low_rr.rr==1 and low_rr.eligible
+    assert not make_plan(1000,1020,990).eligible
 
 
 def test_first_strong_resistance_C_and_independent_pullback_D():
@@ -113,3 +116,24 @@ def test_pullback_range_stops_before_deep_high_rr_supports():
     # Explicit quote controls the range, even if the previous daily close differs.
     b.metadata["current_quote"]={"price":3300}
     assert not any(p.kind.startswith("第") for p in plans_for(b,t,c))
+
+
+def test_target_first_uses_real_support_deduplicates_and_never_builds_ceiling():
+    b,t,c=inputs()
+    t["latest"]=1100
+    support=Band("real",1030,1040,10,("price_structure",),("price",),True,2)
+    resistance=Band("target",1101,1110,10,("price_structure",),("price",),True,2)
+    t["bands"]=[support,resistance]
+    plans=plans_for(b,t,c)
+    assert len(plans)==1 and plans[0].entry==1040 and plans[0].target1==1100
+    assert set(plans[0].generation_routes)=={"entry_first","target_first"}
+    assert plans[0].entry!=Decimal(1100)/Decimal("1.05")
+    # A wider structural stop lowers RR but never changes the selected support or target.
+    t["atr"]=1000
+    wide=plans_for(b,t,c)[0]
+    assert wide.eligible and wide.rr<1.3
+    assert (wide.entry,wide.target1,wide.support_id)==(plans[0].entry,plans[0].target1,plans[0].support_id)
+    t["bands"]=[Band("too_high",1050,1060,10,("price_structure",),("price",),True,2),resistance]
+    assert not any(p.eligible for p in plans_for(b,t,c))
+    t["bands"]=[resistance]
+    assert plans_for(b,t,c)==[]

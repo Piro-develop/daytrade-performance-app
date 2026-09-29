@@ -42,7 +42,7 @@ const chartLines=tech=>["weekly","daily"].flatMap(frame=>{
 // Display-only return from each scenario's own Entry; stored prices and RR stay unchanged.
 const strategyValue=(plan,key)=>{
   if(plan[key]==null) return "該当なし";
-  if(key==="rr") return num(plan[key]);
+  if(key==="rr") return num(plan[key])+"（参考）";
   const price=Number(plan[key]),entry=Number(plan.entry);
   const label=num(plan[key])+"円";
   if(!["target1","target2","stop1","stop2"].includes(key)||
@@ -52,20 +52,21 @@ const strategyValue=(plan,key)=>{
   return Number(rounded)===0?label:label+"（"+(rate>0?"+":"")+rounded+"%）";
 };
 const strategyName=p=>p.kind==="現値"?"現値Entry":p.kind;
-const strategyAssessment=p=>p.rr_evaluation||"価格条件を確認";
+const strategyAssessment=p=>"価格構造・第1利確5%以上";
+const strategyReason=p=>"実在する支持・抵抗からEntryと利確を決定。RRは採用条件ではなく参考値です。";
 export function visibleEntryPlans(r) {
   const current=Number(r.metadata?.automatic?.current_quote?.price??r.technical?.daily?.at(-1)?.close??r.technical?.latest);
   const range=Number(r.metadata?.screening?.pullback_search??.1);
   return (r.plans||[]).filter(p=>{
     const entry=Number(p.entry),target=Number(p.target1),stop=Number(p.stop1),rr=Number(p.rr);
     if(p.entry==null||p.target1==null||p.stop1==null||p.rr==null||![entry,target,stop,rr].every(Number.isFinite)||entry<=0||!(stop<entry&&entry<target)) return false;
-    if(p.eligible===false||(target-entry)*100<entry*5||rr<1.3) return false;
+    if((target-entry)*100<entry*5) return false;
     return !p.kind?.includes("押し目")||(Number.isFinite(current)&&current>0&&range>0&&range<=.1&&entry<current&&entry>=current*(1-range));
   });
 }
 const entryStrategySummary=r=>visibleEntryPlans(r).length?
   "有効なEntry候補："+visibleEntryPlans(r).map(strategyName).join("、")+"。到達・反転確認が必要です。":
-  "見送り。現在値から10%以内の現実的な支持帯では、第1利確まで5%以上かつRR1.3以上を満たす有効なEntry候補がありません。";
+  "見送り。現在値から10%以内の現実的な支持帯では、第1主要抵抗まで5%以上の上昇余地を確保できる有効なEntry候補がありません。";
 const strategySupport=(p,t)=>{
   const b=(t.bands||[]).find(b=>b.band_id===p.support_id);
   return {low:p.support_low??b?.low,high:p.support_high??b?.high,basis:p.support_basis?.length?p.support_basis:b?.basis||[]};
@@ -73,12 +74,12 @@ const strategySupport=(p,t)=>{
 export function entryStrategiesHtml(r) {
   const plans=visibleEntryPlans(r);
   if(!plans.length) return '<section class="j-strategies"><h3>Entry戦略</h3><p>'+esc(entryStrategySummary(r))+'</p></section>';
-  return '<section class="j-strategies"><h3>Entry戦略比較</h3><p class="j-muted">押し目は到達時の反転・支持維持を確認する候補です。RR改善だけで買いを意味しません。</p><div class="j-horizons">'+
+  return '<section class="j-strategies"><h3>Entry戦略比較</h3><p class="j-muted">Entryと第1利確を先に確認し、構造から損切を決めています。RRは最後に算出した参考値です。到達時の反転・支持維持を確認してください。</p><div class="j-horizons">'+
     plans.map(p=>{
       const support=strategySupport(p,r.technical||{});
       return '<article class="j-mini j-strategy"><h3>'+esc(strategyName(p))+'</h3><p>支持帯 '+num(support.low)+'〜'+num(support.high)+'</p><p>支持根拠：'+esc(support.basis.join("＋")||"旧履歴：詳細根拠の記録なし")+'</p><div class="j-metrics">'+
         [["Entry","entry"],["第1利確","target1"],["最終利確","target2"],["Alert","alert"],["第1損切","stop1"],["最終損切","stop2"],["RR","rr"]].map(([label,key])=>metric(label,strategyValue(p,key))).join("")+
-        metric("RR評価（参考）",p.rr_evaluation||"旧規則の履歴")+metric("評価",strategyAssessment(p))+metric("採用／不採用理由",p.entry_reason||"再分析で最新条件を確認してください")+'</div><p>'+esc(publicInvalidation(p,r.technical||{}))+'</p></article>';
+        metric("RR評価（参考）",p.rr_evaluation||"旧規則の履歴")+metric("評価",strategyAssessment(p))+metric("採用／不採用理由",strategyReason(p))+'</div><p>'+esc(publicInvalidation(p,r.technical||{}))+'</p></article>';
     }).join("")+'</div></section>';
 }
 
@@ -105,6 +106,9 @@ export function buildChatGPTText(results, selectedHorizon="swing", kind="現値"
       "日足MA："+[13,25,50,75].map(n=>n+"日 "+num(d["ma"+n])).join(" / "),
       "出来高比："+num(t.volume_ratio));
     for(const [code,item] of Object.entries(sc.items||{})) if(["SW-D4","SW-E1","SW-E2","SW-E4"].includes(code)&&item.score!=null) lines.push("出来高・需給："+item.reason);
+    lines.push("", "### 自動評価で未カバー（"+names[h]+"）",
+      ...(screen.uncovered_objective?.length?screen.uncovered_objective.map(label=>"- "+label):
+        [screen.uncovered_objective?"- 対象の全項目を評価済み":"- 保存時の項目一覧なし。再分析で確認してください"]));
     lines.push(...chartLines(t));
     for(const [name,filter] of [
       ["主要支持帯",b=>price!=null&&Number(b.high)<Number(price)],
@@ -120,7 +124,7 @@ export function buildChatGPTText(results, selectedHorizon="swing", kind="現値"
         "支持根拠："+(support.basis.join("＋")||"旧履歴：詳細根拠の記録なし"));
       for(const [label,key] of [["Entry候補","entry"],["第1利確","target1"],["最終利確","target2"],
         ["Alert","alert"],["通常損切","stop1"],["最終損切","stop2"],["RR","rr"]]) lines.push(label+"："+strategyValue(plan,key));
-      lines.push("第1利確までの上昇率："+(plan.first_target_upside_pct==null?"旧履歴：未記録":num(plan.first_target_upside_pct)+"%"),"評価："+strategyAssessment(plan),"採用／不採用理由："+(plan.entry_reason||"再分析で最新条件を確認してください"),"RR評価（参考）："+(plan.rr_evaluation||"旧規則の履歴"),"価格構造の無効化："+publicInvalidation(plan,t),"有効期限："+plan.expires_at);
+      lines.push("第1利確までの上昇率："+(plan.first_target_upside_pct==null?"旧履歴：未記録":num(plan.first_target_upside_pct)+"%"),"評価："+strategyAssessment(plan),"採用／不採用理由："+(strategyReason(plan)),"RR評価（参考）："+(plan.rr_evaluation||"旧規則の履歴"),"価格構造の無効化："+publicInvalidation(plan,t),"有効期限："+plan.expires_at);
     }
     if(plans.length) lines.push("価格戦略の要約："+entryStrategySummary(r));
     lines.push("投資前提崩れ："+((r.metadata.exit_conditions||[]).join(" / ")||"追加調査で具体化が必要"));
@@ -128,7 +132,9 @@ export function buildChatGPTText(results, selectedHorizon="swing", kind="現値"
     lines.push("確認事項："+(warnings.join(" / ")||"記録された警告なし"));
   }
   lines.push("", "## 基本業績・公開指標・信用需給",...(first.metadata.screening.facts||[]).map(x=>"- "+x),
-    "", "## ChatGPTで確認する項目",...Array.from(new Set(Object.values(results).flatMap(r=>r.metadata?.screening?.chatgpt_checks||[]))).map(x=>"- "+x),
+    "", "## アプリでは定量化しない定性調査",...Array.from(new Set(Object.values(results).flatMap(r=>r.metadata?.screening?.chatgpt_checks||[]))).map(x=>"- "+x),
+    "一次定量評価は、自動取得・評価できた項目内での加重平均です。未評価項目は0点扱いしていません。",
+    "アプリの点数は固定し、ChatGPTで再計算しないでください。未カバー項目・定性情報・最新情報を補完し、投資妙味と今買う／待つ／見送るを検討し、人間が最終判断します。",
     "上記の不足情報を出典・日付付きで確認してください。通常損切と投資前提崩れによる撤退を分け、最後は人間がチャートと売買条件を確認します。");
   return lines.join("\n");
 }
@@ -274,8 +280,9 @@ export function createJudgment(root,getUser,getSecurities) {
     const note=screen?"詳しく調べる価値の一次判定です。買い判断ではありません。" : r.metadata.is_demo?"検証用の架空データ":expired?"価格プランの有効期限切れ":d.approval_required?"重大警告の確認が必要":d.status;
     const macro=obj(r.technical.macro);
     const horizonScore=h=>{const x=results[h];return x?.scores?.[scenario.split(":")[0]]||x?.scores?.["現値"]||Object.values(x?.scores||{})[0]||{};};
-    const coverageText=(sc,key)=>sc[key]==null?"未記録":(100*sc[key]).toFixed(1)+"%";
+    const coverageText=(sc,key)=>sc[key]==null?"未記録":(100*sc[key]).toFixed(2)+"%";
     const scoreSummary=(h,key)=>{const sc=horizonScore(h),status=key==="entry"?sc.entry_status:sc.status;
+      if(screen) return scoreText(sc[key])+" / coverage "+coverageText(sc,key==="entry"?"entry_coverage":"coverage");
       return scoreText(sc[key])+" / "+(sc[key]==null?"評価保留":status==="評価可能"?"通常評価":"暫定評価")+
         " / coverage "+coverageText(sc,key==="entry"?"entry_coverage":"coverage");};
     $("result").hidden=false;
@@ -287,7 +294,7 @@ export function createJudgment(root,getUser,getSecurities) {
         ["スイング"+quantLabel,scoreSummary("swing","investment")],["スイングEntry品質",scoreSummary("swing","entry")],
         ["中長期"+quantLabel,scoreSummary("midlong","investment")],["中長期Entry品質",scoreSummary("midlong","entry")],[expired||inputVersion!==resultVersion?"分析時の株価":"現在値（参考・遅延あり）",num(r.metadata.automatic?.current_quote?.price??price)],
         ...(plans.length?[[screen?"Entry候補":!d.label||label.startsWith("評価保留")?"Entry候補（未確定）":"推奨Entry",num(p.entry)],["第1利確",num(p.target1)],["最終利確",num(p.target2)],["Alert",num(p.alert)],
-        ["第1損切",num(p.stop1)],["最終損切",num(p.stop2)],["RR",num(p.rr)]]:[]),["データ信頼度",num(r.confidence?.value)+" / 100"]
+        ["第1損切",num(p.stop1)],["最終損切",num(p.stop2)],["RR（参考）",num(p.rr)]]:[]),["データ信頼度",num(r.confidence?.value)+" / 100"]
       ].map(([k,v])=>metric(k,v)).join("")+'</div>',
       '<p class="j-concern"><b>最大懸念</b> '+esc(findings[0]?.reason||d.wait_reasons?.[0]||"記録された懸念なし")+'</p>',
       '<p class="j-concern"><b>価格戦略</b> '+esc(entryStrategySummary(r))+'</p>',
@@ -306,7 +313,7 @@ export function createJudgment(root,getUser,getSecurities) {
       detail("独立した事前確認・Critical / Severe / Warning",findings.map(f=>'<div class="j-finding"><b>'+esc(f.severity+" · "+f.code)+'</b><p>'+esc(f.reason)+'</p><small>対応：'+esc(f.resolution||"根拠と条件を再確認")+' / Evidence: '+esc((f.evidence_ids||[]).join(", "))+'</small></div>').join("")||"<p>警告なし</p>"),
       d.approval_required?detail("重大警告を確認して記録",'<p>対象の条件判断：'+esc(d.candidate||d.label||d.status)+'</p><p>承認は対象分析と価格プランだけに有効です。注文は実行しません。</p><p id="j-approval-status"></p>'+(d.approval_eligible&&!r.metadata.is_demo&&!expired?check("approval-confirm","上の警告・残存リスク・撤退条件を確認した")+'<div class="j-actions"><button type="button" class="secondary-button" data-approval="approved">条件を承認して記録</button><button type="button" class="secondary-button" data-approval="rejected">拒否を記録</button></div>':"<p>現在の条件では承認できません。</p>")):"",
       detail("不足データ",list(missingDetails)+list((s.missing||[]).map(id=>catalog?.cards[id]?.label||id))),
-      detail("判断材料・採点の根拠",(screen?'<p>取得できた客観カードだけの加重平均。一次定量評価coverage '+coverageText(s,'coverage')+' / Entry coverage '+coverageText(s,'entry_coverage')+'。対象は週足・基本業績・出来高・相対強度・需給など、時間軸別に定めた機械評価項目です。最終投資妙味ではなく、旧スコアとは比較できません。</p>':r.metadata.evaluation_policy==='coverage-v1'?'<p>評価済み構造化カードの加重平均 '+num(s.structured)+' / 投資妙味coverage '+coverageText(s,'coverage')+' / Entry coverage '+coverageText(s,'entry_coverage')+'</p><p>任意の定性補足 '+(s.context==null?'未利用（スコア計算には不要）':num(s.context))+'</p>':'<p>旧規則：構造化評価 '+num(s.structured)+' × 70% ＋ 定性コンテキスト '+num(s.context)+' × 30%</p>')+'<p>'+quantLabel+'：'+esc(s.status)+' ／ Entry品質：'+esc(s.entry_status)+'</p>'+Object.entries(s.items||{}).map(([id,row])=>'<div class="j-evidence"><b>'+esc(catalog?.cards[id]?.label||id)+' — '+num(row.score)+'</b><p>'+esc(row.reason)+'</p><p class="j-muted">反証：'+esc(row.counter_reason)+'</p><small>Evidence: '+esc((row.evidence_ids||[]).join(", "))+'</small></div>').join("")+'<h3>不足項目</h3>'+list(s.missing)),
+      detail("判断材料・採点の根拠",(screen?'<p>一次定量評価は、自動取得・評価できた項目内での加重平均です。未評価項目は0点扱いしていません。一次定量評価coverage '+coverageText(s,'coverage')+' / Entry coverage '+coverageText(s,'entry_coverage')+'。対象は週足・基本業績・出来高・相対強度・需給など、時間軸別に定めた機械評価項目です。最終投資妙味ではなく、旧スコアとは比較できません。</p>':r.metadata.evaluation_policy==='coverage-v1'?'<p>評価済み構造化カードの加重平均 '+num(s.structured)+' / 投資妙味coverage '+coverageText(s,'coverage')+' / Entry coverage '+coverageText(s,'entry_coverage')+'</p><p>任意の定性補足 '+(s.context==null?'未利用（スコア計算には不要）':num(s.context))+'</p>':'<p>旧規則：構造化評価 '+num(s.structured)+' × 70% ＋ 定性コンテキスト '+num(s.context)+' × 30%</p>')+'<p>'+quantLabel+'：'+esc(s.status)+' ／ Entry品質：'+esc(s.entry_status)+'</p>'+Object.entries(s.items||{}).map(([id,row])=>'<div class="j-evidence"><b>'+esc(catalog?.cards[id]?.label||id)+' — '+num(row.score)+'</b><p>'+esc(row.reason)+'</p><p class="j-muted">反証：'+esc(row.counter_reason)+'</p><small>Evidence: '+esc((row.evidence_ids||[]).join(", "))+'</small></div>').join("")+'<h3>不足項目</h3>'+list(s.missing)),
       ...(screen?[]:[
         ["業績・将来成長",["SW-A","ML-A","ML-B","ML-D","ML-F"]],
         ["カタリスト",["SW-C","ML-C"]],["市場期待・織り込み",["SW-B","ML-E"]],
@@ -319,7 +326,7 @@ export function createJudgment(root,getUser,getSecurities) {
         ["企業の感応度",macro.company_sensitivity],["セクター要因と個別材料の強弱",macro.dominant_force]
       ].map(([k,v])=>'<li><b>'+esc(k)+'</b><p>'+esc(v||"不足")+'</p></li>').join("")+'</ol><p>個別材料：'+esc(macro.specific_factors||"不足")+'</p><p>根拠が揃っているか：'+(macro.valid?"確認済み":"不足")+'</p>'),
       detail("Evidence・データ信頼度・決算",'<p>'+esc(r.confidence?.note)+'</p><p>決算予定：'+esc(r.earnings?.scheduled_at||(r.earnings?.state==='none_within_30_days'?'今後30日以内に決算なしを確認':'不明（Warning）'))+'</p>'+Object.values(r.evidence||{}).map(e=>'<div class="j-evidence"><b>'+esc(e.evidence_id)+'</b><p>'+esc(e.summary)+'</p><small>'+esc(e.source_name)+" / "+esc(e.source_uri)+" / "+esc(e.observed_at)+'</small>'+imageButton(e)+'</div>').join("")),
-      screen?detail("ChatGPTで確認する項目",list(screen.chatgpt_checks),true):"",
+      screen?detail("ChatGPTで確認する項目","<h3>自動評価で未カバー</h3>"+list(screen.uncovered_objective||["保存時の項目一覧なし。再分析で確認してください"])+"<h3>アプリでは定量化しない定性調査</h3>"+list(screen.chatgpt_checks)+"<p>アプリの点数は固定し、ChatGPTで再計算しません。未カバー項目・定性情報を補完して、人間が最終判断します。</p>",true):"",
       screen?'<div class="j-actions">'+button("copy-chatgpt","ChatGPT分析用にコピー")+'</div><p id="j-copy-status" role="status"></p><textarea id="j-copy-text" aria-label="ChatGPTへ渡す分析" readonly hidden></textarea>':"",
       '<p class="j-muted">分析ID：'+esc(r.run_id)+'<br>設定：'+esc(r.config_version)+'<br>判断支援用の記録です。自動売買は行いません。</p>'
     ].join("");

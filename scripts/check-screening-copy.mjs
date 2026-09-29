@@ -103,3 +103,20 @@ const valid={...abeja,plans:[{kind:"第1押し目",entry:2850,target1:3020,stop1
 assert.equal(visibleEntryPlans(valid).length,1);
 assert.ok(entryStrategiesHtml(valid).includes("2,850円"));
 console.log("ABEJA deep plans and rejected current hidden; 5% boundary and valid nearby Entry shown");
+
+// A structural plan survives even when old history marked it rejected only for low RR.
+const lowRR={...r,plans:[{kind:"現値",entry:1000,target1:1060,stop1:940,rr:1,eligible:false}]};
+assert.equal(visibleEntryPlans(lowRR).length,1);
+for(const output of [entryStrategiesHtml(lowRR),buildChatGPTText({swing:lowRR})]) {
+ assert.ok(output.includes("1,060円（+6.00%）"));
+ assert.ok(output.includes("1（参考）"));
+}
+const uncovered={...r,metadata:{...r.metadata,screening:{...r.metadata.screening,
+ uncovered_objective:["最新公式業績比較","相対強度"]}},
+ scores:{"現値":{investment:10,coverage:2/39,entry:null,entry_coverage:0,items:{}}}};
+const handoff=buildChatGPTText({midlong:uncovered});
+for(const text of ["一次定量評価：10.0", "coverage 5.13%", "自動評価で未カバー", "最新公式業績比較", "相対強度",
+ "アプリでは定量化しない定性調査", "市場期待", "ChatGPTで再計算しない", "未評価項目は0点扱いしていません"])
+ assert.ok(handoff.includes(text),text);
+assert.ok(!handoff.includes("暫定スコア"));
+console.log("Low RR remains a reference; uncovered objective labels and fixed subset score handed to ChatGPT");

@@ -61,6 +61,7 @@ for code in args.symbols:
             market=Decimal(str(acquired['metadata'].get('current_quote',{}).get('price') or r['technical']['daily'][-1]['close']))
             assert market*Decimal('.9')<=Decimal(str(p['entry']))<market
             assert p['eligible']
+            assert set(p['generation_routes'])=={'entry_first','target_first'}
             assert Decimal(str(p['entry']))<Decimal(str(r['plans'][0]['entry'])) if r['plans'][0]['kind']=='現値' else True
         if len(pullbacks)==2: assert Decimal(str(pullbacks[1]['entry']))<Decimal(str(pullbacks[0]['entry']))
 
@@ -77,7 +78,7 @@ for code in args.symbols:
             assert stop<entry<target
             upside=(target-entry)/entry*100
             assert abs(Decimal(str(p['first_target_upside_pct']))-upside)<Decimal('.000001')
-            assert p['eligible']==(upside>=5 and Decimal(str(p['rr']))>=Decimal('1.3'))
+            assert p['eligible']==(upside>=5)
             assert p['entry_reason']
             if p['eligible']: assert upside>=5 # No tiny-upside candidate can qualify.
             assert abs(Decimal(str(p['rr']))-(target-entry)/(entry-stop))<Decimal('.000001')
@@ -85,10 +86,13 @@ for code in args.symbols:
             if p['target2'] is not None: assert Decimal(str(p['target2']))>=target
             if p['stop2'] is not None: assert Decimal(str(p['stop2']))<stop
         first=next(iter(r['scores'].values()))
-        assert first['entry'] is not None and first['entry_coverage']>=.6
+        if r['plans']: assert first['entry'] is not None and first['entry_coverage']>=.6
+        else: assert r['metadata']['screening']['price_strategy_status']=='見送り'
         assert first['investment'] is not None and 0<first['coverage']<=1
         assert r['metadata']['screening']['label'] in ('通過','要確認','非通過')
         assert r['metadata']['screening']['chatgpt_checks']
+        assert 'uncovered_objective' in r['metadata']['screening']
+        assert all(f['severity']=='Warning' for f in r['findings'] if f['code']=='plan_missing')
         assert not any('AI' in f['reason'] for f in r['findings'])
         assert all(f['severity']=='Warning' for f in r['findings'] if f['code'].startswith('unchecked_'))
         assert not any(c.startswith(('SC-','MC-')) for c in first['missing'])

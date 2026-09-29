@@ -117,18 +117,22 @@ def test_screening_uses_risk_and_structure_not_missing_qualitative():
     label=lambda fs=():classify(tech,[plan],scores,list(fs),earnings,{},cfg)[0]
     assert label()=="通過"
     plan.rr=Decimal("1")
-    assert label()=="要確認" # Low RR alone never rejects the stock.
+    assert label()=="通過" # RR is reference information, not an admission gate.
     from investment_app.screening import strategy_summary
     pull=SimpleNamespace(kind="第1押し目",entry=900,target1=1000,rr=Decimal("1.7"),trigger_confirmed=False)
     assert "第1押し目" in strategy_summary([plan,pull],cfg)
     assert "有効なEntry候補" in strategy_summary([plan,pull],cfg)
-    assert classify(tech,[plan,pull],scores,[],earnings,{},cfg)[0]=="要確認"
+    assert classify(tech,[plan,pull],scores,[],earnings,{},cfg)[0]=="通過"
     plan.rr=Decimal("2")
     scores["現値"].coverage=.05
     assert label()=="要確認"
     scores["現値"].coverage=1
     assert label([Finding("confirmed",Severity.SEVERE,"decision","実在する重大リスク")])=="要確認"
     assert label([Finding("conflict",Severity.CRITICAL,"all","銘柄矛盾")])=="非通過"
+    no_entry=[Finding("plan_missing",Severity.CRITICAL,"entry","有効プランなし")]
+    assert classify(tech,[],scores,no_entry,earnings,{},cfg)[0]=="要確認"
+    falling={"daily":list(reversed([dict(ma13=80+i,ma25=90+i,ma50=100+i,ma75=110+i,close=70+i) for i in range(6)])),"weekly_trend":"下降"}
+    assert classify(falling,[],scores,no_entry,earnings,{},cfg)[0]=="非通過"
     earnings["state"]="unknown"
     assert label()=="要確認"
 
@@ -164,3 +168,28 @@ def test_screening_retains_critical_and_severe_approval():
     assert result["decisions"]["現値:avoid"]["label"]=="非通過"
     assert not result["decisions"]["現値:avoid"]["approval_eligible"]
     assert result["scores"]["現値"]["investment"] is None
+
+
+def test_uncovered_objective_labels_keep_ten_points_at_low_coverage_without_plan():
+    from investment_app.application import analyze
+    from investment_app.screening import apply_screening
+    from investment_app.uat_service import bundle_from_input
+    from investment_app.models import Finding,Severity
+    from investment_app.horizons import horizon_cards
+    raw,meta=demo()
+    bundle=bundle_from_input(raw,meta,meta["symbol"],meta["as_of"])
+    cfg=load_config();result=analyze(bundle,cfg)
+    result.metadata['horizon']='midlong'
+    result.plans=[]
+    result.findings=[Finding('plan_missing',Severity.CRITICAL,'entry','有効Entryなし')]
+    result.technical.update(weekly_trend='上昇',pivots={},daily=[dict(ma13=110+i,ma25=100+i,ma50=90+i,ma75=80+i,close=120+i) for i in range(6)])
+    for score in result.scores.values():
+        score.items={'ML-I':{'score':10,'reason':'検証済み流動性','evidence_ids':[]}}
+    apply_screening(result,bundle,cfg)
+    score=next(iter(result.scores.values()))
+    assert score.investment==10 and abs(score.coverage-2/39)<1e-12
+    screen=result.metadata['screening']
+    assert screen['label']=='要確認' and screen['price_strategy_status']=='見送り'
+    assert horizon_cards('midlong')['ML-A']['label'] in screen['uncovered_objective']
+    assert horizon_cards('midlong')['ML-I']['label'] not in screen['uncovered_objective']
+    assert all(f.severity==Severity.WARNING for f in result.findings if f.code=='plan_missing')
