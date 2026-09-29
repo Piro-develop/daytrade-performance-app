@@ -92,6 +92,7 @@ for code in args.symbols:
         assert r['metadata']['screening']['label'] in ('通過','要確認','非通過')
         assert r['metadata']['screening']['chatgpt_checks']
         assert 'uncovered_objective' in r['metadata']['screening']
+        assert not any(label.startswith(code+' ') for label in r['metadata']['screening']['uncovered_objective'] for code in r['metadata']['screening']['weights'])
         assert all(f['severity']=='Warning' for f in r['findings'] if f['code']=='plan_missing')
         assert not any('AI' in f['reason'] for f in r['findings'])
         assert all(f['severity']=='Warning' for f in r['findings'] if f['code'].startswith('unchecked_'))

@@ -148,7 +148,7 @@ def apply_screening(result,bundle,cfg):
             scenario_reasons.insert(0,strategy_summary(result.plans,cfg))
         result.decisions[scenario]=Decision(scenario_label,state,None,[],scenario_reasons,result.findings,[],refs,bool(severe),
             bool(severe and complete and plan and entry_is_eligible(plan,cfg) and result.scores[kind].entry is not None and label!='非通過' and state!=EvaluationStatus.UNAVAILABLE))
-    uncovered=[cards[code]['label']+('（一部未評価）' if first.items.get(code,{}).get('score') is not None else '')
+    uncovered=[cards[code]['label'].removeprefix(code).strip()+('（一部未評価）' if first.items.get(code,{}).get('score') is not None else '')
         for code in weights if first.items.get(code,{}).get('score') is None or first.items[code].get('coverage',1)<1]
     result.metadata.update(evaluation_policy=VERSION,screening={'version':VERSION,'label':label,'reasons':reasons,
         'daily_state':daily,'pullback_search':cfg['pullback_search'],'price_strategy_status':'候補あり' if any(entry_is_eligible(p,cfg) for p in result.plans) else '見送り','strategy_summary':strategy_summary(result.plans,cfg),'facts':objective_summary(bundle),'chatgpt_checks':followup(bundle),
