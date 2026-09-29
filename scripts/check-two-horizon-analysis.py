@@ -30,6 +30,10 @@ for code in args.symbols:
     assert status==200 and db.commits==1
     assert out['saved'] and set(out['results'])=={'swing','midlong'}
     assert not any('5分' in x or 'デイトレ' in x for x in out['missing'])
+    check_path=Path('.runtime')/('entry-range-'+code+'.json')
+    check_path.parent.mkdir(exist_ok=True)
+    check_path.write_text(json.dumps(out['results'],ensure_ascii=False),encoding='utf-8')
+    subprocess.run(['node','scripts/check-screening-copy.mjs',str(check_path)],check=True)
     previous=None
     if baseline:
         olddb=FakeFirestore()
@@ -54,9 +58,14 @@ for code in args.symbols:
         assert len({p['support_id'] for p in pullbacks})==len(pullbacks)
         for p in pullbacks:
             assert p['support_basis'] and Decimal(str(p['stop1']))<Decimal(str(p['support_low']))
+            market=Decimal(str(acquired['metadata'].get('current_quote',{}).get('price') or r['technical']['daily'][-1]['close']))
+            assert market*Decimal('.9')<=Decimal(str(p['entry']))<market
+            assert p['eligible']
             assert Decimal(str(p['entry']))<Decimal(str(r['plans'][0]['entry'])) if r['plans'][0]['kind']=='現値' else True
         if len(pullbacks)==2: assert Decimal(str(pullbacks[1]['entry']))<Decimal(str(pullbacks[0]['entry']))
 
+        if not any(p['eligible'] for p in r['plans']):
+            assert r['metadata']['screening']['price_strategy_status']=='見送り'
         saved=store(db).get(r['run_id'])
         assert all(saved[k]==v for k,v in r.items() if k!='presentation')
         assert r['technical']['weekly_count']>=58
@@ -68,9 +77,9 @@ for code in args.symbols:
             assert stop<entry<target
             upside=(target-entry)/entry*100
             assert abs(Decimal(str(p['first_target_upside_pct']))-upside)<Decimal('.000001')
-            assert p['eligible']==(upside>5 and Decimal(str(p['rr']))>=Decimal('1.3'))
+            assert p['eligible']==(upside>=5 and Decimal(str(p['rr']))>=Decimal('1.3'))
             assert p['entry_reason']
-            if p['eligible']: assert upside>5 # No tiny-upside candidate can qualify.
+            if p['eligible']: assert upside>=5 # No tiny-upside candidate can qualify.
             assert abs(Decimal(str(p['rr']))-(target-entry)/(entry-stop))<Decimal('.000001')
             assert all(k in p for k in ('target2','alert','stop2'))
             if p['target2'] is not None: assert Decimal(str(p['target2']))>=target

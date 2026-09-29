@@ -17,11 +17,11 @@ def rr_bucket(value: Decimal, cfg: dict) -> str:
 def entry_eligibility(entry, target, value, cfg):
     upside=(D(target)-D(entry))/D(entry)*100
     minimum=D(cfg.get("min_first_target_upside_pct",5))
-    if upside<=minimum:
-        return False,f"第1主要抵抗までの上昇余地 {upside:+.2f}%は{minimum:g}%以下のため不足（{minimum:g}%超が必要）"
+    if upside<minimum:
+        return False,f"第1主要抵抗までの上昇余地 {upside:+.2f}%は{minimum:g}%未満のため不足（{minimum:g}%以上が必要）"
     if value<D(cfg.get("rr_minimum",1.3)):
         return False,f"上昇余地 {upside:+.2f}%、RR {value:.2f}は1.3未満。Entry改善待ち"
-    return True,f"上昇余地 {upside:+.2f}%は{minimum:g}%超、RR {value:.2f}は1.3以上。到達・反転確認が必要"
+    return True,f"上昇余地 {upside:+.2f}%は{minimum:g}%以上、RR {value:.2f}は1.3以上。到達・反転確認が必要"
 
 
 def entry_is_eligible(plan,cfg):
@@ -61,6 +61,9 @@ def plans_for(bundle: Bundle, technical: dict, cfg: dict, specified_entry=None) 
         return rounded(result,step(result),up)
     market = D(technical["latest"])
     current = round_price(specified_entry if specified_entry is not None else market,True)
+    public_quote=bundle.metadata.get("automatic",{}).get("entry_source")=="public_quote"
+    reference=D(specified_entry) if public_quote and specified_entry is not None else D((bundle.metadata.get("current_quote") or {}).get("price") or market)
+    minimum_pullback_price=reference*(1-D(cfg["pullback_search"]))
     strong = [b for b in technical["bands"] if b.strength >= cfg["strong_band"]]
     supports = sorted([b for b in strong if D(b.high) < current], key=lambda b:b.high,reverse=True)
     resistances = sorted([b for b in strong if D(b.low) > current],key=lambda b:b.low)
@@ -108,22 +111,17 @@ def plans_for(bundle: Bundle, technical: dict, cfg: dict, specified_entry=None) 
         if first: plans.append(first)
 
     # Keep structural prices fixed; admit only candidates passing upside then RR.
-    # Rejected nearby plans are diagnostics when fewer than two valid bands exist.
+    # Only actual supports within the configured market-price range are searched.
     selected=[]
-    rejected=[]
     for support in supports:
+        if D(support.high)<minimum_pullback_price: break
         families=getattr(support,"families",())
         if not (len(families)>1 or "price_structure" in families or "volume_profile" in families or getattr(support,"reactions",0)>0): continue
         entry=round_price(support.high,True)
-        if entry>=current: continue
+        if entry>=min(current,reference) or entry<minimum_pullback_price: continue
         if selected and (D(support.high)>=D(selected[-1].support_low) or entry>=selected[-1].entry): continue
         candidate=build(entry,support,"押し目")
-        if candidate:
-            (selected if candidate.eligible else rejected).append(candidate)
+        if candidate and candidate.eligible: selected.append(candidate)
         if len(selected)==2: break
-    for candidate in rejected:
-        if len(selected)==2: break
-        if all(D(candidate.support_high)<D(p.support_low) or D(p.support_high)<D(candidate.support_low) for p in selected):
-            selected.append(candidate)
     selected.sort(key=lambda p:p.entry,reverse=True)
     return plans+[replace(p,kind="第"+str(i+1)+"押し目") for i,p in enumerate(selected)]

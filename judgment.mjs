@@ -52,14 +52,27 @@ const strategyValue=(plan,key)=>{
   return Number(rounded)===0?label:label+"（"+(rate>0?"+":"")+rounded+"%）";
 };
 const strategyName=p=>p.kind==="現値"?"現値Entry":p.kind;
-const strategyAssessment=p=>p.eligible===false?"見送り（不採用）":p.eligible===true?"採用候補・"+(p.rr_evaluation||""):"旧履歴：5%条件未検証";
+const strategyAssessment=p=>p.rr_evaluation||"価格条件を確認";
+export function visibleEntryPlans(r) {
+  const current=Number(r.metadata?.automatic?.current_quote?.price??r.technical?.daily?.at(-1)?.close??r.technical?.latest);
+  const range=Number(r.metadata?.screening?.pullback_search??.1);
+  return (r.plans||[]).filter(p=>{
+    const entry=Number(p.entry),target=Number(p.target1),stop=Number(p.stop1),rr=Number(p.rr);
+    if(p.entry==null||p.target1==null||p.stop1==null||p.rr==null||![entry,target,stop,rr].every(Number.isFinite)||entry<=0||!(stop<entry&&entry<target)) return false;
+    if(p.eligible===false||(target-entry)*100<entry*5||rr<1.3) return false;
+    return !p.kind?.includes("押し目")||(Number.isFinite(current)&&current>0&&range>0&&range<=.1&&entry<current&&entry>=current*(1-range));
+  });
+}
+const entryStrategySummary=r=>visibleEntryPlans(r).length?
+  "有効なEntry候補："+visibleEntryPlans(r).map(strategyName).join("、")+"。到達・反転確認が必要です。":
+  "見送り。現在値から10%以内の現実的な支持帯では、第1利確まで5%以上かつRR1.3以上を満たす有効なEntry候補がありません。";
 const strategySupport=(p,t)=>{
   const b=(t.bands||[]).find(b=>b.band_id===p.support_id);
   return {low:p.support_low??b?.low,high:p.support_high??b?.high,basis:p.support_basis?.length?p.support_basis:b?.basis||[]};
 };
 export function entryStrategiesHtml(r) {
-  const plans=r.plans||[];
-  if(!plans.length) return "";
+  const plans=visibleEntryPlans(r);
+  if(!plans.length) return '<section class="j-strategies"><h3>Entry戦略</h3><p>'+esc(entryStrategySummary(r))+'</p></section>';
   return '<section class="j-strategies"><h3>Entry戦略比較</h3><p class="j-muted">押し目は到達時の反転・支持維持を確認する候補です。RR改善だけで買いを意味しません。</p><div class="j-horizons">'+
     plans.map(p=>{
       const support=strategySupport(p,r.technical||{});
@@ -79,7 +92,7 @@ export function buildChatGPTText(results, selectedHorizon="swing", kind="現値"
     if(!r.metadata?.screening) continue;
     const t=r.technical||{},screen=r.metadata.screening;
     const sc=r.scores?.[kind]||r.scores?.["現値"]||Object.values(r.scores||{})[0]||{};
-    const p=(r.plans||[]).find(p=>p.kind===kind)||(r.plans||[]).find(p=>p.kind==="現値");
+    const plans=visibleEntryPlans(r);
     const d=(t.daily||[]).at(-1)||{},w=(t.weekly||[]).at(-1)||{};
     const price=r.metadata.automatic?.current_quote?.price??d.close??t.latest;
     lines.push("", "## "+names[h],"一次判定："+screen.label,"現在値（参考・遅延あり）："+num(price),
@@ -100,8 +113,8 @@ export function buildChatGPTText(results, selectedHorizon="swing", kind="現値"
       lines.push(name+"："+(bands.map(b=>num(b.low)+"〜"+num(b.high)).join(" / ")||"未確認"));
     }
     lines.push("", "### Entry戦略");
-    if(!(r.plans||[]).length) lines.push("価格戦略：未成立");
-    for(const plan of r.plans||[]) {
+    if(!plans.length) lines.push("価格戦略："+entryStrategySummary(r));
+    for(const plan of plans) {
       const support=strategySupport(plan,t);
       lines.push("#### "+strategyName(plan),"支持帯 "+num(support.low)+"〜"+num(support.high),
         "支持根拠："+(support.basis.join("＋")||"旧履歴：詳細根拠の記録なし"));
@@ -109,7 +122,7 @@ export function buildChatGPTText(results, selectedHorizon="swing", kind="現値"
         ["Alert","alert"],["通常損切","stop1"],["最終損切","stop2"],["RR","rr"]]) lines.push(label+"："+strategyValue(plan,key));
       lines.push("第1利確までの上昇率："+(plan.first_target_upside_pct==null?"旧履歴：未記録":num(plan.first_target_upside_pct)+"%"),"評価："+strategyAssessment(plan),"採用／不採用理由："+(plan.entry_reason||"再分析で最新条件を確認してください"),"RR評価（参考）："+(plan.rr_evaluation||"旧規則の履歴"),"価格構造の無効化："+publicInvalidation(plan,t),"有効期限："+plan.expires_at);
     }
-    if(screen.strategy_summary) lines.push("価格戦略の要約："+screen.strategy_summary);
+    if(plans.length) lines.push("価格戦略の要約："+entryStrategySummary(r));
     lines.push("投資前提崩れ："+((r.metadata.exit_conditions||[]).join(" / ")||"追加調査で具体化が必要"));
     const warnings=(r.findings||[]).map(f=>f.severity+"："+f.reason);
     lines.push("確認事項："+(warnings.join(" / ")||"記録された警告なし"));
@@ -238,10 +251,11 @@ export function createJudgment(root,getUser,getSecurities) {
   function renderResult() {
     const r=results[horizon];if(!r) return;
     const screen=r.metadata.screening,quantLabel=screen?"一次定量評価":"投資妙味";
-    const keys=Object.keys(r.decisions);
-    if(!keys.includes(scenario)) scenario=keys.find(k=>k==="現値:avoid")||keys[0];
+    const plans=visibleEntryPlans(r);
+    const keys=Object.keys(r.decisions).filter(k=>plans.some(p=>p.kind===k.split(":")[0]));
+    if(!keys.includes(scenario)) scenario=keys.find(k=>k==="現値:avoid")||keys[0]||"";
     const d=r.decisions[scenario]||{},kind=scenario.split(":")[0],s=r.scores[kind]||Object.values(r.scores)[0]||{};
-    const p=r.plans.find(p=>p.kind===kind)||{};
+    const p=plans.find(p=>p.kind===kind)||{};
     const planGaps=r.metadata.automatic?.card_gaps_by_plan?.[kind];
     const missingDetails=planGaps ? Object.entries(planGaps).map(([id,gap])=>
       id+" "+(catalog?.cards[id]?.label||id)+"："+gap.reason).concat((r.findings||[])
@@ -253,7 +267,7 @@ export function createJudgment(root,getUser,getSecurities) {
     const preferred=inputVersion===resultVersion?recommended.filter(h=>Object.values(results[h]?.presentation||{}).some(v=>v.can_recommend&&!v.expired)):[];
     const recommendationText=screen&&Object.values(results).every(x=>x.metadata?.screening?.label==="非通過")?"該当なし（非通過）":screen?(preferred.length?preferred.map(h=>names[h]).join(" / ")+"（追加調査候補）":Object.values(results).filter(x=>x.metadata?.screening?.label!=="非通過").map(x=>names[x.metadata.horizon]).join(" / ")+"（追加確認）") : preferred.length?preferred.map(h=>names[h]).join(" / "):Object.values(results).every(x=>Object.values(x.decisions||{}).every(d=>d.label==="見送り"))?"見送り":"未判定（必要情報が不足）";
     const view=r.presentation?.[scenario]||{};
-    let label=view.label||d.label||d.status||"未評価";
+    let label=screen?.label||view.label||d.label||d.status||"未評価";
     if(!screen&&findings.some(f=>f.severity==="Critical"))label="評価保留";
     if(inputVersion!==resultVersion)label+="（保存済みの分析）";
     else if(expired&&!label.includes("期限切れ"))label+="（期限切れ・履歴）";
@@ -267,21 +281,21 @@ export function createJudgment(root,getUser,getSecurities) {
     $("result").hidden=false;
     $("result").innerHTML=[
       '<div class="j-result-head"><div><p class="section-kicker">判断サマリ</p><h2>'+esc(r.symbol+" "+r.name)+'</h2></div>'+'<span hidden>'+button("export-result","JSON保存")+'</span>'+'</div>',
-      '<p id="j-recommendation" class="j-muted">推奨時間軸：'+esc(recommendationText)+'<br>表示中：'+esc(names[horizon]+" / "+kind)+'</p>',
+      '<p id="j-recommendation" class="j-muted">推奨時間軸：'+esc(recommendationText)+'<br>表示中：'+esc(names[horizon]+(kind?" / "+kind:" / 価格戦略：見送り"))+'</p>',
       '<div class="j-verdict"><strong id="j-verdict-label">'+esc(label)+'</strong><span>'+esc(note)+'</span></div>',
       '<div class="j-metrics">'+[
         ["スイング"+quantLabel,scoreSummary("swing","investment")],["スイングEntry品質",scoreSummary("swing","entry")],
         ["中長期"+quantLabel,scoreSummary("midlong","investment")],["中長期Entry品質",scoreSummary("midlong","entry")],[expired||inputVersion!==resultVersion?"分析時の株価":"現在値（参考・遅延あり）",num(r.metadata.automatic?.current_quote?.price??price)],
-        [screen?"Entry候補":!d.label||label.startsWith("評価保留")?"Entry候補（未確定）":"推奨Entry",num(p.entry)],["第1利確",num(p.target1)],["最終利確",num(p.target2)],["Alert",num(p.alert)],
-        ["第1損切",num(p.stop1)],["最終損切",num(p.stop2)],["RR",num(p.rr)],["データ信頼度",num(r.confidence?.value)+" / 100"]
+        ...(plans.length?[[screen?"Entry候補":!d.label||label.startsWith("評価保留")?"Entry候補（未確定）":"推奨Entry",num(p.entry)],["第1利確",num(p.target1)],["最終利確",num(p.target2)],["Alert",num(p.alert)],
+        ["第1損切",num(p.stop1)],["最終損切",num(p.stop2)],["RR",num(p.rr)]]:[]),["データ信頼度",num(r.confidence?.value)+" / 100"]
       ].map(([k,v])=>metric(k,v)).join("")+'</div>',
       '<p class="j-concern"><b>最大懸念</b> '+esc(findings[0]?.reason||d.wait_reasons?.[0]||"記録された懸念なし")+'</p>',
-      screen?.strategy_summary?'<p class="j-concern"><b>価格戦略</b> '+esc(screen.strategy_summary)+'</p>':"",
+      '<p class="j-concern"><b>価格戦略</b> '+esc(entryStrategySummary(r))+'</p>',
       entryStrategiesHtml(r),
       (label.startsWith("評価保留")?'<p class="j-muted">価格戦略は取得済み価格からの参考候補です。買い推奨は未確定です。</p>':""),
       (r.metadata.automatic?.current_quote?.observed_at?'<p class="j-muted">株価の観測日時：'+esc(new Date(r.metadata.automatic.current_quote.observed_at).toLocaleString("ja-JP",{timeZone:"Asia/Tokyo"}))+'（日本時間）</p>':""),
       detail("時間軸・価格条件を変更",'<div class="j-grid"><label>表示する時間軸<select id="j-horizon">'+Object.keys(results).map(h=>opt(h,names[h])).join("")+'</select></label>'+
-      '<label>価格・決算方針<select id="j-scenario">'+keys.map(k=>opt(k,k.replace(":avoid","・決算を跨がない").replace(":allow","・決算を跨ぐ"))).join("")+'</select></label></div>'),
+      '<label>価格・決算方針<select id="j-scenario">'+(keys.length?keys.map(k=>opt(k,k.replace(":avoid","・決算を跨がない").replace(":allow","・決算を跨ぐ"))).join(""):opt("","有効なEntry候補なし"))+'</select></label></div>'),
       '<p id="j-stale" class="j-error" role="status">'+(inputVersion!==resultVersion?"保存された分析です。現在の入力との一致を確認して再分析してください。":"")+'</p>',
       '<p class="j-muted">分析日時：'+esc(r.as_of)+' ／ 価格プラン有効期限：'+esc(p.expires_at||"未成立")+'</p>',
       detail("2つの時間軸を比較",'<div class="j-horizons">'+Object.entries(results).map(([h,x])=>{

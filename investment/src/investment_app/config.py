@@ -35,7 +35,9 @@ def validate_config(cfg: dict) -> None:
     if cfg["rr_good"] != 2 or cfg["rr_conditional"] != 1.5 or cfg.get("rr_minimum",1.3) != 1.3:
         raise InputError("RR区分は確定要件です。")
     if cfg.get("min_first_target_upside_pct",5) != 5:
-        raise InputError("第1利確の最低上昇余地は5%超です。")
+        raise InputError("第1利確の最低上昇余地は5%以上です。")
+    if not 0 < cfg["pullback_search"] <= .1:
+        raise InputError("押し目探索範囲は現在値から10%以内です。")
     for key in ("atr_period", "rsi_period", "bb_period", "pivot_span", "strong_band"):
         if not isinstance(cfg[key], (int, float)) or cfg[key] <= 0:
             raise InputError("技術設定は正数が必要です。")

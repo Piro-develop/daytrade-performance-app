@@ -7,7 +7,7 @@ from .horizons import horizon_cards
 from .preflight import confidence
 from .entry_exit import entry_is_eligible, entry_eligibility
 
-VERSION="screening-1.2.0"
+VERSION="screening-1.3.0"
 # Original card weights, restricted to the explicitly defined objective universe.
 WEIGHTS={
     "swing":{"SW-A3":4,"SW-D1":4.9,"SW-D2":4.2,"SW-D3":2.8,"SW-D4":2.1,
@@ -68,17 +68,10 @@ def followup(bundle):
 
 
 def strategy_summary(plans,cfg):
-    current=next((p for p in plans if p.kind in ("現値","指定価格")),None)
-    pullbacks=[p for p in plans if p.kind in ("第1押し目","第2押し目") and entry_is_eligible(p,cfg)]
     valid=[p for p in plans if entry_is_eligible(p,cfg)]
-    text="現値Entryは未成立。" if current is None else (
-        ("現値Entry" if current.kind=="現値" else "指定価格Entry")+
-        ("：採用候補。" if entry_is_eligible(current,cfg) else "：見送り。")+
-        entry_eligibility(current.entry,current.target1,current.rr,cfg)[1]+"。")
-    if not valid: return text+"有効なEntry候補なし。押し目待ち。"
-    if current is None or not entry_is_eligible(current,cfg):
-        text+=" ".join(f"{p.kind} Entry {p.entry:,.2f}："+entry_eligibility(p.entry,p.target1,p.rr,cfg)[1]+"。" for p in pullbacks)
-    return text
+    if not valid:
+        return f"見送り。現在値から{cfg['pullback_search']*100:g}%以内の現実的な支持帯では、第1利確まで5%以上かつRR1.3以上を満たす有効なEntry候補がありません。"
+    return "有効なEntry候補："+"、".join(p.kind for p in valid)+"。到達・反転確認が必要です。"
 
 
 def classify(tech, plans, scores, findings, earnings, facts, cfg):
@@ -153,11 +146,11 @@ def apply_screening(result,bundle,cfg):
         if plan and not entry_is_eligible(plan,cfg):
             if label!='非通過': scenario_label='要確認'
             if state!=EvaluationStatus.UNAVAILABLE: state=EvaluationStatus.PROVISIONAL
-            scenario_reasons.insert(0,entry_eligibility(plan.entry,plan.target1,plan.rr,cfg)[1])
+            scenario_reasons.insert(0,strategy_summary(result.plans,cfg))
         result.decisions[scenario]=Decision(scenario_label,state,None,[],scenario_reasons,result.findings,[],refs,bool(severe),
             bool(severe and complete and plan and entry_is_eligible(plan,cfg) and result.scores[kind].entry is not None and label!='非通過' and state!=EvaluationStatus.UNAVAILABLE))
     result.metadata.update(evaluation_policy=VERSION,screening={'version':VERSION,'label':label,'reasons':reasons,
-        'daily_state':daily,'strategy_summary':strategy_summary(result.plans,cfg),'facts':objective_summary(bundle),'chatgpt_checks':followup(bundle),
+        'daily_state':daily,'pullback_search':cfg['pullback_search'],'price_strategy_status':'候補あり' if any(entry_is_eligible(p,cfg) for p in result.plans) else '見送り','strategy_summary':strategy_summary(result.plans,cfg),'facts':objective_summary(bundle),'chatgpt_checks':followup(bundle),
         'weights':weights,'meaning':'詳しく調べる価値の一次判定。最終投資妙味・買い判断ではありません。'})
     cfg['screening_policy']={'version':VERSION,'weights':WEIGHTS}
     result.config_version+=':'+VERSION;result.config_hash=digest(cfg)
