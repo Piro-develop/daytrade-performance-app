@@ -87,7 +87,7 @@ const state = {
   summaryFilters: { period: "all", style: "all", accountType: "all" },
   recordQuery: "",
   recordSecurityCode: null,
-  pnlPeriod: "day",
+  pnlPeriod: "all",
   pnlSelections: { day: localDate(), week: currentWeekStart(), month: localDate().slice(0, 7) },
   unsubscribe: null,
   form: { mode: "new", action: "買付", editId: null, selected: null, manual: false, sellContext: null, interestDayOverrides: {}, positionAllocations: {}, allocationMethod: ALLOCATION_SETTINGS.defaultMethod, allocationGroup: "", allocationTouched: false, availableCreditLots: [], availableCreditGroups: [], evaluationPrice: "", tradingUnit: ALLOCATION_SETTINGS.defaultTradingUnit, evaluationProfitOverrides: {}, evaluationExpenseOverrides: {} }
