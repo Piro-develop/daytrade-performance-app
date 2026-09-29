@@ -147,8 +147,17 @@ def test_screening_retains_critical_and_severe_approval():
     db=FakeFirestore()
     result=run_all(bundle,store(db))["swing"]
     decision=result["decisions"]["現値:avoid"]
-    assert decision["approval_required"] and decision["approval_eligible"]
+    assert decision["approval_required"] and not decision["approval_eligible"]
+    assert not next(p for p in result["plans"] if p["kind"]=="現値")["eligible"]
     assert decision["label"]=="要確認"
+    # A separately valid test price plan still permits the existing Severe approval flow.
+    from investment_app.application import analyze
+    from investment_app.entry_exit import make_plan
+    eligible_result=analyze(bundle,load_config())
+    eligible_result.metadata["horizon"]="swing"
+    eligible_result.plans=[make_plan(1000,1100,950)]
+    apply_screening(eligible_result,bundle,load_config())
+    assert eligible_result.decisions["現値:avoid"].approval_eligible
     meta["warnings"].append({"code":"actual_conflict","severity":"Critical","scope":"all",
         "reason":"解消していない銘柄矛盾","evidence_ids":["demo-financial"]})
     result=run_all(bundle_from_input(raw,meta,meta["symbol"],meta["as_of"]),store(db))["swing"]
