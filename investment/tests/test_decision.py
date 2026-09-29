@@ -46,15 +46,15 @@ def test_rr_between_15_and_2_can_be_conditional():
     assert p.rr==Decimal("1.7")
     assert decide(b,s,p,[],load_config(),"allow").label=="条件付き買い"
 
-def test_low_rr_requires_supported_dominant_material():
+def test_low_rr_cannot_be_admitted_by_dominant_material():
     b,s,p=inputs(8,8,950,1060)
     assert decide(b,s,p,[],load_config(),"allow").label=="押し目待ち"
     b.metadata["dominant_factor"]={"direction":"positive","reason":"contract",
         "why_score_is_insufficient":"single factor","rr_rationale":"defined risk",
         "alternative_entry_reason":"may miss catalyst","invalidation":"contract loss","evidence_ids":["e"]}
     result=decide(b,s,p,[],load_config(),"allow")
-    assert result.label=="条件付き買い"
-    assert {x["kind"] for x in result.overrides}=={"low_rr","under7"}
+    assert result.label=="押し目待ち"
+    assert result.overrides==[]
     assert p.stop1==950
 
 def test_negative_dominant_material_overrides_without_rewriting_scores():

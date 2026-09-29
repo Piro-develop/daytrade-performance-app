@@ -14,22 +14,39 @@ def rr_bucket(value: Decimal, cfg: dict) -> str:
     return ("良好" if value >= D(cfg["rr_good"]) else "許容" if value >= D(cfg["rr_conditional"])
             else "最低限／要確認" if value >= D(cfg.get("rr_minimum",1.3)) else "Entry改善待ち")
 
+def entry_eligibility(entry, target, value, cfg):
+    upside=(D(target)-D(entry))/D(entry)*100
+    minimum=D(cfg.get("min_first_target_upside_pct",5))
+    if upside<=minimum:
+        return False,f"第1主要抵抗までの上昇余地 {upside:+.2f}%は{minimum:g}%以下のため不足（{minimum:g}%超が必要）"
+    if value<D(cfg.get("rr_minimum",1.3)):
+        return False,f"上昇余地 {upside:+.2f}%、RR {value:.2f}は1.3未満。Entry改善待ち"
+    return True,f"上昇余地 {upside:+.2f}%は{minimum:g}%超、RR {value:.2f}は1.3以上。到達・反転確認が必要"
+
+
+def entry_is_eligible(plan,cfg):
+    return entry_eligibility(plan.entry,plan.target1,plan.rr,cfg)[0]
+
+
 def rounded(value, tick, up=False):
     return (D(value)/D(tick)).to_integral_value(rounding=ROUND_CEILING if up else ROUND_FLOOR) * D(tick)
 
 def make_plan(entry, target, stop, *, kind="現値", support_id="", resistance_id="",
               evidence_ids=(), expires_at="", target2=None, stop2=None, alert=None,
-              trigger_confirmed=False) -> EntryPlan | None:
+              trigger_confirmed=False, cfg=None) -> EntryPlan | None:
+    if not D(stop)<D(entry)<D(target): return None
+    upside=(D(target)-D(entry))/D(entry)*100
     value = rr(entry,target,stop)
     if value is None:
         return None
+    eligible,reason=entry_eligibility(entry,target,value,cfg or {})
     fields = [str(entry),str(target),str(stop),kind,support_id,resistance_id]
     return EntryPlan(digest(fields)[:16],kind,D(entry),D(target),D(stop),value,
         D(target2) if target2 is not None and D(target2)>=D(target) else None,
         D(stop2) if stop2 is not None and D(stop2)<D(stop) else None,
         D(alert) if alert is not None and D(stop)<D(alert)<D(entry) else None,
         support_id,resistance_id,tuple(evidence_ids),
-        f"支持帯 {support_id} を割り、想定価格構造が否定された場合に再評価",expires_at,trigger_confirmed)
+        f"支持帯 {support_id} を割り、想定価格構造が否定された場合に再評価",expires_at,trigger_confirmed,first_target_upside_pct=upside,eligible=eligible,entry_reason=reason)
 
 def plans_for(bundle: Bundle, technical: dict, cfg: dict, specified_entry=None) -> list[EntryPlan]:
     if not technical["tick_valid"]:
@@ -71,7 +88,7 @@ def plans_for(bundle: Bundle, technical: dict, cfg: dict, specified_entry=None) 
                          {technical["technical_evidence_id"],bundle.metadata["tick_evidence_id"]}))
         plan=make_plan(entry,target,stop,kind=kind,support_id=support.band_id,resistance_id=above[0].band_id,
                        evidence_ids=refs,expires_at=expires.isoformat(),target2=target2,stop2=stop2,
-                       alert=round_price(support.high),trigger_confirmed=confirmed)
+                       alert=round_price(support.high),trigger_confirmed=confirmed,cfg=cfg)
         if plan is None: return None
         basis=tuple(getattr(support,"basis",()))
         if getattr(support,"reactions",0)>0: basis+=("過去反発・反応 "+str(support.reactions)+"回",)
@@ -90,15 +107,23 @@ def plans_for(bundle: Bundle, technical: dict, cfg: dict, specified_entry=None) 
         first=build(current,support,kind,bool(kind=="現値" and current==market and (bounce or breaking or retest)))
         if first: plans.append(first)
 
-    # Disjoint clusters, nearest first. No RR-target search or isolated MA selection.
+    # Keep structural prices fixed; admit only candidates passing upside then RR.
+    # Rejected nearby plans are diagnostics when fewer than two valid bands exist.
     selected=[]
+    rejected=[]
     for support in supports:
         families=getattr(support,"families",())
         if not (len(families)>1 or "price_structure" in families or "volume_profile" in families or getattr(support,"reactions",0)>0): continue
         entry=round_price(support.high,True)
         if entry>=current: continue
         if selected and (D(support.high)>=D(selected[-1].support_low) or entry>=selected[-1].entry): continue
-        candidate=build(entry,support,"第"+str(len(selected)+1)+"押し目")
-        if candidate: selected.append(candidate)
+        candidate=build(entry,support,"押し目")
+        if candidate:
+            (selected if candidate.eligible else rejected).append(candidate)
         if len(selected)==2: break
-    return plans+selected
+    for candidate in rejected:
+        if len(selected)==2: break
+        if all(D(candidate.support_high)<D(p.support_low) or D(p.support_high)<D(candidate.support_low) for p in selected):
+            selected.append(candidate)
+    selected.sort(key=lambda p:p.entry,reverse=True)
+    return plans+[replace(p,kind="第"+str(i+1)+"押し目") for i,p in enumerate(selected)]

@@ -112,14 +112,14 @@ def test_screening_uses_risk_and_structure_not_missing_qualitative():
     rows=[dict(ma13=110+i,ma25=100+i,ma50=90+i,ma75=80+i,close=120+i) for i in range(6)]
     tech={"daily":rows,"weekly_trend":"上昇"}
     scores={"現値":SimpleNamespace(coverage=1,entry=8,entry_coverage=.95)}
-    plan=SimpleNamespace(rr=Decimal("2"),kind="現値",trigger_confirmed=True)
+    plan=SimpleNamespace(entry=1000,target1=1100,rr=Decimal("2"),kind="現値",trigger_confirmed=True)
     earnings={"state":"none_within_30_days"}
     label=lambda fs=():classify(tech,[plan],scores,list(fs),earnings,{},cfg)[0]
     assert label()=="通過"
     plan.rr=Decimal("1")
     assert label()=="要確認" # Low RR alone never rejects the stock.
     from investment_app.screening import strategy_summary
-    pull=SimpleNamespace(kind="第1押し目",entry=900,rr=Decimal("1.7"),trigger_confirmed=False)
+    pull=SimpleNamespace(kind="第1押し目",entry=900,target1=1000,rr=Decimal("1.7"),trigger_confirmed=False)
     assert "第1押し目" in strategy_summary([plan,pull],cfg)
     assert "1.70" in strategy_summary([plan,pull],cfg)
     assert classify(tech,[plan,pull],scores,[],earnings,{},cfg)[0]=="要確認"

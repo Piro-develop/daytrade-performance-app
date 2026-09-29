@@ -3,7 +3,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 from investment_app.models import Band
 from investment_app.config import load_config
-from investment_app.entry_exit import plans_for,rr_bucket
+from investment_app.entry_exit import plans_for,rr_bucket,make_plan
 
 
 def inputs():
@@ -31,9 +31,9 @@ def test_independent_pullbacks_keep_current_prices_and_stop_first():
     assert (current.entry,current.stop1,current.stop2,current.target1,current.target2)==(1000,948,898,1099,1199)
     assert [p.kind for p in (current,first,second)]==["現値","第1押し目","第2押し目"]
     assert (first.entry,first.stop1,first.target1)==(960,948,1099)
-    assert (second.entry,second.stop1,second.target1)==(920,898,949)
-    assert first.support_id!=second.support_id and second.resistance_id==first.support_id
-    assert "25日線" in first.support_basis and "13週線" in second.support_basis
+    assert (second.entry,second.stop1,second.target1)==(820,798,899)
+    assert first.support_id!=second.support_id and second.resistance_id=="s2"
+    assert "25日線" in first.support_basis and "26週線" in second.support_basis
     for p in (current,first,second):
         assert p.rr==(p.target1-p.entry)/(p.entry-p.stop1)
         assert p.stop1<Decimal(str(p.support_low))<=Decimal(str(p.support_high))
@@ -49,6 +49,7 @@ def test_missing_current_target_does_not_hide_valid_deeper_plan_or_invent_one():
     t["bands"]=t["bands"][:2]
     plans=plans_for(b,t,c)
     assert len(plans)==1 and plans[0].entry==920 and plans[0].target1==949
+    assert plans[0].eligible is False # Retained only to explain the rejected scenario.
     # A lone MA is not automatically a pullback support, even with an admitted strength.
     t["bands"]=[Band("ma",950,950,10,("moving_average",),("price",),True,0,("13週線",)),
                 Band("r",1100,1100,10,("price_structure",),("price",),True,1)]
@@ -67,3 +68,26 @@ def test_live_quote_is_current_price_but_never_invents_closed_bar_trigger():
     specified=plans_for(b,t,c,specified_entry=1050)[0]
     assert specified.kind=="指定価格"
     assert (current.entry,current.stop1,current.target1,current.rr)==(specified.entry,specified.stop1,specified.target1,specified.rr)
+
+
+def test_minimum_upside_A_B_and_strict_boundary():
+    a=make_plan(1000,1001,999)
+    assert a.first_target_upside_pct==Decimal("0.1") and not a.eligible
+    assert not make_plan(1000,1001,Decimal("999.5")).eligible # RR 2 alone cannot qualify.
+    b=make_plan(1000,1060,970)
+    assert b.first_target_upside_pct==6 and b.rr==2 and b.eligible
+    assert not make_plan(1000,1050,990).eligible
+    assert not make_plan(1000,1060,900).eligible
+
+
+def test_first_strong_resistance_C_and_independent_pullback_D():
+    b,t,c=inputs()
+    t["bands"]=[Band("support",970,980,10,("price_structure",),("price",),True,2),
+                Band("r1",1031,1040,10,("price_structure",),("price",),True,2),
+                Band("r2",1081,1090,10,("price_structure",),("price",),True,2)]
+    current,pullback=plans_for(b,t,c)
+    assert current.target1==1030 and current.target2==1080
+    assert current.first_target_upside_pct==3 and not current.eligible
+    assert pullback.entry==980 and pullback.target1==1030 and pullback.stop1==968
+    assert pullback.first_target_upside_pct>5 and pullback.rr>=Decimal("1.3") and pullback.eligible
+    assert "以下" in current.entry_reason

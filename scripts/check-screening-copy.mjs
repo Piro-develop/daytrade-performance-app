@@ -60,3 +60,12 @@ for(const entry of [100,0,null]){
  }
 }
 console.log("4461 / 9449: all three scenario percentages, missing values and unchanged data passed");
+
+const rejected={...r,plans:[{...r.plans[0],entry:1000,target1:1001,stop1:999.5,rr:2,
+ eligible:false,first_target_upside_pct:.1,entry_reason:"上昇余地0.1%は5%以下のため不足"}]};
+for(const output of [entryStrategiesHtml(rejected),buildChatGPTText({swing:rejected})]){
+ assert.ok(output.includes("見送り（不採用）"));
+ assert.ok(output.includes("上昇余地0.1%は5%以下のため不足"));
+ assert.ok(!output.includes("採用候補・"));
+}
+console.log("Tiny upside remains rejected in UI and copy even with RR 2");

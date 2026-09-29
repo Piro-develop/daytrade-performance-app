@@ -1,5 +1,5 @@
 {
-  "config_version": "swing-entry-strategies-1.0.0",
+  "config_version": "swing-entry-upside-1.1.0",
   "schema_version": 1,
   "mix": [
     1,
@@ -167,5 +167,6 @@
   "rsi_method": "rolling_simple",
   "coverage_min": 0.6,
   "coverage_normal": 0.8,
-  "rr_minimum": 1.3
+  "rr_minimum": 1.3,
+  "min_first_target_upside_pct": 5.0
 }

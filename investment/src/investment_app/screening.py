@@ -5,8 +5,9 @@ from .models import Decision, EvaluationStatus, Finding, Severity, digest
 from .scoring import weighted_available, catalog
 from .horizons import horizon_cards
 from .preflight import confidence
+from .entry_exit import entry_is_eligible, entry_eligibility
 
-VERSION="screening-1.1.0"
+VERSION="screening-1.2.0"
 # Original card weights, restricted to the explicitly defined objective universe.
 WEIGHTS={
     "swing":{"SW-A3":4,"SW-D1":4.9,"SW-D2":4.2,"SW-D3":2.8,"SW-D4":2.1,
@@ -68,21 +69,15 @@ def followup(bundle):
 
 def strategy_summary(plans,cfg):
     current=next((p for p in plans if p.kind in ("現値","指定価格")),None)
-    pullbacks=[p for p in plans if p.kind in ("第1押し目","第2押し目")]
-    minimum=Decimal(str(cfg.get("rr_minimum",1.3)))
-    if current is None:
-        return "現値Entryは未成立。" + ("押し目到達時の価格戦略を確認してください。" if pullbacks else "有効な価格戦略がありません。")
-    label="現値" if current.kind=="現値" else "指定価格"
-    text=f"{label}RR {current.rr:.2f}。"
-    improved=[p for p in pullbacks if p.rr>current.rr]
-    if current.rr<minimum:
-        if improved: text+=" ".join(f"{p.kind} Entry {p.entry:,.2f}ではRR {p.rr:.2f}。" for p in improved)
-        if not any(p.rr>=minimum for p in pullbacks):
-            text+="RR1.3以上の押し目は該当なし。現時点では価格戦略上の妙味が乏しく、追加確認が必要です。"
-        else: text+="到達・反転確認を待つ候補です。"
-    else:
-        from .entry_exit import rr_bucket
-        text+=rr_bucket(current.rr,cfg)+"。価格条件とトリガーを確認してください。"
+    pullbacks=[p for p in plans if p.kind in ("第1押し目","第2押し目") and entry_is_eligible(p,cfg)]
+    valid=[p for p in plans if entry_is_eligible(p,cfg)]
+    text="現値Entryは未成立。" if current is None else (
+        ("現値Entry" if current.kind=="現値" else "指定価格Entry")+
+        ("：採用候補。" if entry_is_eligible(current,cfg) else "：見送り。")+
+        entry_eligibility(current.entry,current.target1,current.rr,cfg)[1]+"。")
+    if not valid: return text+"有効なEntry候補なし。押し目待ち。"
+    if current is None or not entry_is_eligible(current,cfg):
+        text+=" ".join(f"{p.kind} Entry {p.entry:,.2f}："+entry_eligibility(p.entry,p.target1,p.rr,cfg)[1]+"。" for p in pullbacks)
     return text
 
 
@@ -106,11 +101,11 @@ def classify(tech, plans, scores, findings, earnings, facts, cfg):
     if not plans: review.append("価格戦略に必要な情報を追加確認")
     else:
         immediate=next((p for p in plans if p.kind in ("現値","指定価格")),None)
-        if immediate is None or immediate.rr<Decimal(str(cfg['rr_conditional'])):
+        if immediate is None or not entry_is_eligible(immediate,cfg) or immediate.rr<Decimal(str(cfg['rr_conditional'])):
             review.append(strategy_summary(plans,cfg))
     if current.entry is None or current.entry_coverage<cfg['coverage_normal']: review.append("Entryの確認範囲が限定的")
     if weekly!='上昇' or daily!='上昇': review.append("週足・日足の方向が混在、またはトレンドの追加確認が必要")
-    if not any(p.kind=='現値' and p.trigger_confirmed and p.rr>=Decimal(str(cfg.get('rr_minimum',1.3))) for p in plans): review.append("Entryトリガーまたは改善Entryの到達を確認")
+    if not any(p.kind=='現値' and p.trigger_confirmed and entry_is_eligible(p,cfg) and p.rr>=Decimal(str(cfg.get('rr_minimum',1.3))) for p in plans): review.append("Entryトリガーまたは改善Entryの到達を確認")
     if earnings['state']=='unknown': review.append("決算予定未確認")
     if review: return "要確認",list(dict.fromkeys(review)),daily
     return "通過",["客観条件上、詳しく調べる候補。買い判断ではありません。"],daily
@@ -153,8 +148,14 @@ def apply_screening(result,bundle,cfg):
         kind=scenario.split(':')[0];plan=next((p for p in result.plans if p.kind==kind),None)
         refs=sorted({r for item in result.scores[kind].items.values() for r in item.get('evidence_ids',[])})
         state=EvaluationStatus.UNAVAILABLE if any(f.severity==Severity.CRITICAL for f in result.findings) else EvaluationStatus.PROVISIONAL if label=='要確認' else EvaluationStatus.EVALUABLE
-        result.decisions[scenario]=Decision(label,state,None,[],reasons,result.findings,[],refs,bool(severe),
-            bool(severe and complete and plan and result.scores[kind].entry is not None and label!='非通過' and state!=EvaluationStatus.UNAVAILABLE))
+        scenario_label=label
+        scenario_reasons=list(reasons)
+        if plan and not entry_is_eligible(plan,cfg):
+            if label!='非通過': scenario_label='要確認'
+            if state!=EvaluationStatus.UNAVAILABLE: state=EvaluationStatus.PROVISIONAL
+            scenario_reasons.insert(0,entry_eligibility(plan.entry,plan.target1,plan.rr,cfg)[1])
+        result.decisions[scenario]=Decision(scenario_label,state,None,[],scenario_reasons,result.findings,[],refs,bool(severe),
+            bool(severe and complete and plan and entry_is_eligible(plan,cfg) and result.scores[kind].entry is not None and label!='非通過' and state!=EvaluationStatus.UNAVAILABLE))
     result.metadata.update(evaluation_policy=VERSION,screening={'version':VERSION,'label':label,'reasons':reasons,
         'daily_state':daily,'strategy_summary':strategy_summary(result.plans,cfg),'facts':objective_summary(bundle),'chatgpt_checks':followup(bundle),
         'weights':weights,'meaning':'詳しく調べる価値の一次判定。最終投資妙味・買い判断ではありません。'})

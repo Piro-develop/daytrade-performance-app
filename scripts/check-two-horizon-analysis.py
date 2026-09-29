@@ -66,6 +66,11 @@ for code in args.symbols:
         for p in r['plans']:
             entry,stop,target=map(Decimal,(str(p['entry']),str(p['stop1']),str(p['target1'])))
             assert stop<entry<target
+            upside=(target-entry)/entry*100
+            assert abs(Decimal(str(p['first_target_upside_pct']))-upside)<Decimal('.000001')
+            assert p['eligible']==(upside>5 and Decimal(str(p['rr']))>=Decimal('1.3'))
+            assert p['entry_reason']
+            if p['eligible']: assert upside>5 # No tiny-upside candidate can qualify.
             assert abs(Decimal(str(p['rr']))-(target-entry)/(entry-stop))<Decimal('.000001')
             assert all(k in p for k in ('target2','alert','stop2'))
             if p['target2'] is not None: assert Decimal(str(p['target2']))>=target
@@ -93,5 +98,5 @@ for code in args.symbols:
             'score_gaps':r['metadata']['automatic']['card_gaps'],
             'decisions':{k:{s:v[s] for s in ('label','status','wait_reasons')} for k,v in r['decisions'].items()},
             'scores':{k:{s:v[s] for s in ('structured','context','investment','entry','coverage','entry_coverage','status','entry_status')} for k,v in r['scores'].items()},
-            'plans':[{k:p.get(k) for k in ('kind','entry','target1','target2','alert','stop1','stop2','rr','support_low','support_high','support_basis','rr_evaluation')} for p in r['plans']],
+            'plans':[{k:p.get(k) for k in ('kind','entry','target1','target2','alert','stop1','stop2','rr','support_low','support_high','support_basis','rr_evaluation','first_target_upside_pct','eligible','entry_reason')} for p in r['plans']],
             'missing_plan':not bool(r['plans'])},ensure_ascii=True),flush=True)

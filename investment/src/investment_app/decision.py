@@ -22,6 +22,10 @@ def decide(bundle: Bundle, scores: ScoreResult, plan: EntryPlan | None, findings
     if critical or plan is None:
         return Decision(None,EvaluationStatus.UNAVAILABLE,None,buy,
             ["必須の根拠・価格プランを確認して再評価してください。"],findings,[],refs)
+    from .entry_exit import entry_is_eligible, entry_eligibility
+    if not entry_is_eligible(plan,cfg):
+        return Decision("押し目待ち",EvaluationStatus.PROVISIONAL,None,buy,
+            [entry_eligibility(plan.entry,plan.target1,plan.rr,cfg)[1]],findings,[],refs,bool(severe),False)
     # Scope-qualified severe conditions remain visible, including while scores are incomplete.
     if scores.investment is None or scores.entry is None:
         return Decision("Severe警告付き条件判断" if severe else None,EvaluationStatus.PROVISIONAL,None,buy,

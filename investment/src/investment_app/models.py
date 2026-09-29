@@ -151,6 +151,9 @@ class EntryPlan:
     support_high: float | None = None
     support_basis: tuple[str, ...] = ()
     rr_evaluation: str = ""
+    first_target_upside_pct: Decimal | None = None
+    eligible: bool | None = None
+    entry_reason: str = ""
 
 @dataclass
 class ScoreResult:

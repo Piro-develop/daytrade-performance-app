@@ -52,6 +52,7 @@ const strategyValue=(plan,key)=>{
   return Number(rounded)===0?label:label+"（"+(rate>0?"+":"")+rounded+"%）";
 };
 const strategyName=p=>p.kind==="現値"?"現値Entry":p.kind;
+const strategyAssessment=p=>p.eligible===false?"見送り（不採用）":p.eligible===true?"採用候補・"+(p.rr_evaluation||""):"旧履歴：5%条件未検証";
 const strategySupport=(p,t)=>{
   const b=(t.bands||[]).find(b=>b.band_id===p.support_id);
   return {low:p.support_low??b?.low,high:p.support_high??b?.high,basis:p.support_basis?.length?p.support_basis:b?.basis||[]};
@@ -64,7 +65,7 @@ export function entryStrategiesHtml(r) {
       const support=strategySupport(p,r.technical||{});
       return '<article class="j-mini j-strategy"><h3>'+esc(strategyName(p))+'</h3><p>支持帯 '+num(support.low)+'〜'+num(support.high)+'</p><p>支持根拠：'+esc(support.basis.join("＋")||"旧履歴：詳細根拠の記録なし")+'</p><div class="j-metrics">'+
         [["Entry","entry"],["第1利確","target1"],["最終利確","target2"],["Alert","alert"],["第1損切","stop1"],["最終損切","stop2"],["RR","rr"]].map(([label,key])=>metric(label,strategyValue(p,key))).join("")+
-        metric("RR評価",p.rr_evaluation||"旧規則の履歴")+'</div><p>'+esc(publicInvalidation(p,r.technical||{}))+'</p></article>';
+        metric("RR評価（参考）",p.rr_evaluation||"旧規則の履歴")+metric("評価",strategyAssessment(p))+metric("採用／不採用理由",p.entry_reason||"再分析で最新条件を確認してください")+'</div><p>'+esc(publicInvalidation(p,r.technical||{}))+'</p></article>';
     }).join("")+'</div></section>';
 }
 
@@ -106,7 +107,7 @@ export function buildChatGPTText(results, selectedHorizon="swing", kind="現値"
         "支持根拠："+(support.basis.join("＋")||"旧履歴：詳細根拠の記録なし"));
       for(const [label,key] of [["Entry候補","entry"],["第1利確","target1"],["最終利確","target2"],
         ["Alert","alert"],["通常損切","stop1"],["最終損切","stop2"],["RR","rr"]]) lines.push(label+"："+strategyValue(plan,key));
-      lines.push("RR評価："+(plan.rr_evaluation||"旧規則の履歴"),"価格構造の無効化："+publicInvalidation(plan,t),"有効期限："+plan.expires_at);
+      lines.push("第1利確までの上昇率："+(plan.first_target_upside_pct==null?"旧履歴：未記録":num(plan.first_target_upside_pct)+"%"),"評価："+strategyAssessment(plan),"採用／不採用理由："+(plan.entry_reason||"再分析で最新条件を確認してください"),"RR評価（参考）："+(plan.rr_evaluation||"旧規則の履歴"),"価格構造の無効化："+publicInvalidation(plan,t),"有効期限："+plan.expires_at);
     }
     if(screen.strategy_summary) lines.push("価格戦略の要約："+screen.strategy_summary);
     lines.push("投資前提崩れ："+((r.metadata.exit_conditions||[]).join(" / ")||"追加調査で具体化が必要"));
