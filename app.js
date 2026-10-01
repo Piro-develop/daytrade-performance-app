@@ -88,6 +88,7 @@ const state = {
   recordQuery: "",
   recordSecurityCode: null,
   pnlPeriod: "all",
+  recordFilters: { style: "all", accountType: "all" },
   pnlSelections: { day: localDate(), week: currentWeekStart(), month: localDate().slice(0, 7) },
   unsubscribe: null,
   form: { mode: "new", action: "買付", editId: null, selected: null, manual: false, sellContext: null, interestDayOverrides: {}, positionAllocations: {}, allocationMethod: ALLOCATION_SETTINGS.defaultMethod, allocationGroup: "", allocationTouched: false, availableCreditLots: [], availableCreditGroups: [], evaluationPrice: "", tradingUnit: ALLOCATION_SETTINGS.defaultTradingUnit, evaluationProfitOverrides: {}, evaluationExpenseOverrides: {} }
@@ -318,20 +319,30 @@ function styleScopedBrokerActuals(trade) {
   return nonZeroStyles.length > 1 ? null : trade.brokerActuals;
 }
 
-function matchesSummaryFilters(trade, includePeriod = true, style = state.summaryFilters.style) {
-  const { period, accountType } = state.summaryFilters;
-  return (!includePeriod || (trade.date >= summaryPeriodStart(period) && trade.date <= summaryPeriodEnd(period)))
-    && (style === "all" || (trade.action === "売却" && trade.styleProfits ? hasOwn(trade.styleProfits, style) : trade.style === style))
+function matchesTradeFilters(trade, style, accountType) {
+  return (style === "all" || (trade.action === "売却" && trade.styleProfits ? hasOwn(trade.styleProfits, style) : trade.style === style))
     && (accountType === "all" || accountTypeOf(trade) === accountType);
 }
 
-function completedForSummary(calculated, style = state.summaryFilters.style) {
-  const completed = calculated
-    .filter((trade) => trade.action === "売却" && trade.realisedProfit !== null && matchesSummaryFilters(trade, true, style))
-    .map((trade) => style === "all" ? trade : { ...trade, style, realisedProfit: styleProfitOf(trade, style), brokerActuals: styleScopedBrokerActuals(trade), estimatedAfterTaxProfit: undefined });
-  if (style === "all") return completed;
+function matchesSummaryFilters(trade, includePeriod = true, style = state.summaryFilters.style) {
+  const { period, accountType } = state.summaryFilters;
+  return (!includePeriod || (trade.date >= summaryPeriodStart(period) && trade.date <= summaryPeriodEnd(period)))
+    && matchesTradeFilters(trade, style, accountType);
+}
+
+function scopeTradesToStyle(trades, style) {
+  if (style === "all") return trades;
+  const scoped = trades.map((trade) => trade.action === "売却" && trade.realisedProfit !== null
+    ? { ...trade, style, realisedProfit: styleProfitOf(trade, style), brokerActuals: styleScopedBrokerActuals(trade), estimatedAfterTaxProfit: undefined }
+    : trade);
+  const completed = scoped.filter((trade) => trade.action === "売却" && trade.realisedProfit !== null);
   const taxEstimates = calculateAnnualTaxEstimates(completed);
-  return completed.map((trade) => ({ ...trade, ...(taxEstimates.taxResults.get(trade.id) ?? {}) }));
+  return scoped.map((trade) => ({ ...trade, ...(taxEstimates.taxResults.get(trade.id) ?? {}) }));
+}
+
+function completedForSummary(calculated, style = state.summaryFilters.style) {
+  const completed = calculated.filter((trade) => trade.action === "売却" && trade.realisedProfit !== null && matchesSummaryFilters(trade, true, style));
+  return scopeTradesToStyle(completed, style);
 }
 
 function statsFor(completed) {
@@ -562,12 +573,14 @@ function renderRecordSearchOptions() {
 function renderRecordSearchResults(ledger) {
   const candidatesByCode = new Map(recordSecurityCandidates().map((candidate) => [candidate.code, candidate]));
   const period = pnlRange(state.pnlPeriod);
-  const filteredTrades = ledger.calculated.filter((trade) => state.pnlPeriod === "all" || (trade.date >= period.start && trade.date <= period.end));
-  const records = filteredTrades.filter((trade) => {
+  const { style, accountType } = state.recordFilters;
+  const filteredTrades = ledger.calculated.filter((trade) => (state.pnlPeriod === "all" || (trade.date >= period.start && trade.date <= period.end))
+    && matchesTradeFilters(trade, style, accountType));
+  const records = scopeTradesToStyle(filteredTrades.filter((trade) => {
     if (state.recordSecurityCode) return String(trade.code ?? "") === state.recordSecurityCode;
     const candidate = candidatesByCode.get(String(trade.code ?? ""));
     return securityMatchesSearch({ code: trade.code, name: trade.name, reading: candidate?.reading ?? "", aliases: candidate?.aliases ?? [] }, state.recordQuery);
-  }).sort((a, b) => -byTimeAsc(a, b));
+  }).sort((a, b) => -byTimeAsc(a, b)), style);
   const recordGroups = [];
   records.forEach((trade) => {
     let group = recordGroups.at(-1);
@@ -599,7 +612,11 @@ function renderRecordSearchResults(ledger) {
     const priceLabel = trade.action === "買付" ? "買付価格" : "売却価格";
     const allocationStatus = trade.action === "売却" && accountTypeOf(trade) === "信用" && !trade.allocationConfirmed ? " ・ 返済建玉未確認" : "";
     return `<div class="record-entry"><button class="record-entry-main" data-action="edit" data-id="${esc(trade.id)}" type="button"><span class="record-security"><strong>${esc(trade.code)}</strong><span>${esc(trade.name)}</span></span><span class="record-entry-meta"><span>${esc(accountDetailLabel(trade))}${allocationStatus}</span><span>${priceLabel} ${yen(trade.price, false)}</span></span><span class="record-entry-result"><strong class="${resultClass}">${result}</strong>${taxBefore}</span><span class="record-chevron">›</span></button></div>`;
-  }).join("")}</div></section>`).join("") || `<div class="empty-state">${state.recordQuery || state.recordSecurityCode ? "この期間に検索条件に一致する取引はありません" : "この期間の取引はありません"}</div>`;
+  }).join("")}</div></section>`).join("") || `<div class="empty-state">${state.recordQuery || state.recordSecurityCode || style !== "all" || accountType !== "all" ? "選択した条件に該当する取引はありません" : "この期間の取引はありません"}</div>`;
+}
+
+function recordFilterGroup(key, label, options) {
+  return `<div class="summary-filter-row"><span>${label}</span><div class="summary-filter-options" role="group" aria-label="${label}">${options.map(([value, text]) => `<button class="${state.recordFilters[key] === value ? "active" : ""}" data-action="record-filter" data-filter="${key}" data-value="${value}" type="button" aria-pressed="${state.recordFilters[key] === value}">${text}</button>`).join("")}</div></div>`;
 }
 
 function renderRecords(ledger) {
@@ -610,9 +627,14 @@ function renderRecords(ledger) {
   $("#records-view").innerHTML = `
     <div class="pnl-overview">
       <article class="pnl-card"><div><p class="section-kicker">TOTAL PROFIT / LOSS</p><h2>全期間の累計税引後損益</h2></div><strong class="${totalPnl >= 0 ? "positive" : "negative"}">${yen(totalPnl)}</strong><small class="tax-before-secondary">（税引前 ${yen(totalTaxBefore)}）</small><small>SBI実績を優先・未入力分は年間損益通算による概算</small></article>
-      <article class="pnl-card"><div class="pnl-card-heading"><div><p class="section-kicker">PERIOD PROFIT / LOSS</p><h2>期間別の税引後損益</h2></div><div class="pnl-period-switch">${[["all","全期間"],["day","一日"],["week","週間"],["month","月間"]].map(([value,label]) => `<button class="${state.pnlPeriod === value ? "active" : ""}" data-action="pnl-period" data-period="${value}" type="button">${label}</button>`).join("")}</div></div>
-      ${state.pnlPeriod === "all" ? "" : `<div class="pnl-period-selector">${pnlPeriodSelector(state.pnlPeriod)}</div>`}
-      <strong id="record-period-profit" class="positive">${yen(0)}</strong><small id="record-period-tax-before" class="tax-before-secondary">（税引前 ${yen(0)}）</small><small>${period.label} ・ SBI実績を優先・未入力分は概算</small></article>
+      <article class="pnl-card"><div class="pnl-card-heading"><div><p class="section-kicker">PERIOD PROFIT / LOSS</p><h2>期間別の税引後損益</h2></div></div>
+      <div class="record-filters" aria-label="売買記録の集計条件">
+        <div class="summary-filter-row"><span>期間</span><div class="pnl-period-switch" role="group" aria-label="期間">${[["all","全期間"],["day","一日"],["week","週間"],["month","月間"]].map(([value,label]) => `<button class="${state.pnlPeriod === value ? "active" : ""}" data-action="pnl-period" data-period="${value}" type="button" aria-pressed="${state.pnlPeriod === value}">${label}</button>`).join("")}</div></div>
+        ${state.pnlPeriod === "all" ? "" : `<div class="pnl-period-selector record-period-selector">${pnlPeriodSelector(state.pnlPeriod)}</div>`}
+        ${recordFilterGroup("style", "取引スタイル", [["all","全て"],["デイトレ","デイトレ"],["スイング","スイング"]])}
+        ${recordFilterGroup("accountType", "取引区分", [["all","全て"],["現物","現物"],["信用","信用"]])}
+      </div>
+      <strong id="record-period-profit" class="positive">${yen(0)}</strong><small id="record-period-tax-before" class="tax-before-secondary">（税引前 ${yen(0)}）</small><small>${period.label} × ${state.recordFilters.style === "all" ? "全スタイル" : state.recordFilters.style + "分"} × ${state.recordFilters.accountType === "all" ? "全取引区分" : state.recordFilters.accountType} ・ SBI実績を優先・未入力分は概算</small></article>
     </div>
     <div class="view-panel records-list-panel"><div class="records-toolbar"><div class="record-search-wrap"><label class="search-field clearable-search">⌕<input id="record-search" class="keyboard-safe-input" value="${esc(state.recordQuery)}" autocomplete="off" aria-autocomplete="list" aria-controls="record-search-options" aria-expanded="false" placeholder="銘柄コード・銘柄名で検索"><button type="button" class="clear-input-button" data-action="clear-security-input" data-input="record-search" aria-label="売買記録の銘柄検索の入力をクリア" title="入力をクリア"><span aria-hidden="true">×</span></button></label><div id="record-search-options" class="security-options record-search-options hidden" role="listbox"></div></div><div id="record-result-summary" class="record-summary"></div></div>
     <div id="record-groups" class="record-groups"></div></div>`;
@@ -670,6 +692,7 @@ function openRecordTrade(id) {
     return;
   }
   state.pnlPeriod = "all";
+  state.recordFilters = { style: "all", accountType: "all" };
   state.recordQuery = "";
   state.recordSecurityCode = null;
   renderRecords(ledger);
@@ -1407,6 +1430,14 @@ document.addEventListener("click", async (event) => {
   if (action === "open-position-buys") { openPositionBuyEditor(target.dataset.code, target.dataset.accountType); return; }
   if (action === "close-position-lots") { closePositionLotModal(); return; }
   if (action === "edit-position-lot") { const trade = state.trades.find((item) => item.id === target.dataset.id); if (trade) { closePositionLotModal(); openBuy(trade); } return; }
+  if (action === "record-filter") {
+    const options = { style: ["all", "デイトレ", "スイング"], accountType: ["all", "現物", "信用"] };
+    if (options[target.dataset.filter]?.includes(target.dataset.value)) {
+      state.recordFilters[target.dataset.filter] = target.dataset.value;
+      renderRecords(calculateLedger(state.trades));
+    }
+    return;
+  }
   if (action === "pnl-period") { state.pnlPeriod = target.dataset.period; renderRecords(calculateLedger(state.trades)); }
   if (action === "sell") openSell(target.dataset.code, target.dataset.style ?? "スイング", target.dataset.accountType ?? "現物", null, target.dataset.date ?? null);
   if (action === "choose-record-security") {

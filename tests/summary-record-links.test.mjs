@@ -81,7 +81,7 @@ test("対象なし・利益のみ・損失のみ・同額最大でも移動先�
 
 function navigationSetup(exists = true) {
   const events = [], frames = [];
-  const state = { trades: [{ id: "target" }], activeView: "overview", pnlPeriod: "day", recordQuery: "別の銘柄", recordSecurityCode: "9999" };
+  const state = { trades: [{ id: "target" }], activeView: "overview", recordFilters: { style: "スイング", accountType: "現物" }, pnlPeriod: "day", recordQuery: "別の銘柄", recordSecurityCode: "9999" };
   const entry = { dataset: { id: "target" }, classList: { add: value => events.push(value) }, focus: options => events.push(["focus", options.preventScroll]), scrollIntoView: options => events.push(["scroll", options.block]) };
   const ledger = { calculated: exists ? state.trades : [] };
   const context = vm.createContext({ state, calculateLedger: () => ledger,
@@ -97,6 +97,8 @@ test("対象取引を隠す期間・検索を解除し、画面切替後にフ�
   const before = JSON.stringify(state.trades);
   context.openRecordTrade("target");
   assert.equal(state.pnlPeriod, "all");
+  assert.equal(state.recordFilters.style, "all");
+  assert.equal(state.recordFilters.accountType, "all");
   assert.equal(state.recordQuery, "");
   assert.equal(state.recordSecurityCode, null);
   assert.deepEqual(events, ["render", "records"]);

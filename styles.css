@@ -528,3 +528,15 @@ textarea {
 .clear-input-button:hover, .clear-input-button:focus-visible { color: var(--ink); background: #203b2d; }
 .clearable-input > input:placeholder-shown ~ .clear-input-button, .clearable-search > input:placeholder-shown ~ .clear-input-button { visibility: hidden; pointer-events: none; }
 .clearable-input > input[list]::-webkit-calendar-picker-indicator { display: none !important; }
+
+/* Keep the record criteria together at desktop and mobile widths. */
+.record-filters { display: grid; gap: 11px; margin: 4px 0; }
+.record-filters .summary-filter-row { grid-template-columns: 90px minmax(0,1fr); }
+.record-filters .pnl-period-switch { width: 100%; min-width: 0; }
+.record-filters .pnl-period-switch button { min-height: 40px; }
+.record-period-selector { margin-left: 102px; }
+@media(max-width:720px) {
+  .record-filters .summary-filter-row { grid-template-columns: minmax(0,1fr); gap: 7px; }
+  .record-filters .pnl-period-switch { height: auto; }
+  .record-period-selector { margin-left: 0; }
+}
