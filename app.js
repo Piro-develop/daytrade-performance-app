@@ -614,7 +614,7 @@ function renderRecords(ledger) {
       ${state.pnlPeriod === "all" ? "" : `<div class="pnl-period-selector">${pnlPeriodSelector(state.pnlPeriod)}</div>`}
       <strong id="record-period-profit" class="positive">${yen(0)}</strong><small id="record-period-tax-before" class="tax-before-secondary">（税引前 ${yen(0)}）</small><small>${period.label} ・ SBI実績を優先・未入力分は概算</small></article>
     </div>
-    <div class="view-panel records-list-panel"><div class="records-toolbar"><div class="record-search-wrap"><label class="search-field">⌕<input id="record-search" class="keyboard-safe-input" value="${esc(state.recordQuery)}" autocomplete="off" aria-autocomplete="list" aria-controls="record-search-options" aria-expanded="false" placeholder="銘柄コード・銘柄名で検索"></label><div id="record-search-options" class="security-options record-search-options hidden" role="listbox"></div></div><div id="record-result-summary" class="record-summary"></div></div>
+    <div class="view-panel records-list-panel"><div class="records-toolbar"><div class="record-search-wrap"><label class="search-field clearable-search">⌕<input id="record-search" class="keyboard-safe-input" value="${esc(state.recordQuery)}" autocomplete="off" aria-autocomplete="list" aria-controls="record-search-options" aria-expanded="false" placeholder="銘柄コード・銘柄名で検索"><button type="button" class="clear-input-button" data-action="clear-security-input" data-input="record-search" aria-label="売買記録の銘柄検索の入力をクリア" title="入力をクリア"><span aria-hidden="true">×</span></button></label><div id="record-search-options" class="security-options record-search-options hidden" role="listbox"></div></div><div id="record-result-summary" class="record-summary"></div></div>
     <div id="record-groups" class="record-groups"></div></div>`;
   renderRecordSearchResults(ledger);
   const search = $("#record-search");
@@ -1036,6 +1036,15 @@ function renderBrokerActualDifference(calculated) {
 
 function closeModal() { $("#modal-backdrop").classList.add("hidden"); resetForm(); }
 
+function clearSecurityInput(id) {
+  if (!["record-search", "security-query", "manual-code", "manual-name", "j-symbol"].includes(id)) return;
+  const field = document.getElementById(id);
+  if (!field || field.disabled || field.readOnly) return;
+  field.value = "";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  field.focus();
+}
+
 function showSecurityOptions() {
   if (state.form.action !== "買付") return;
   const query = $("#security-query").value;
@@ -1352,6 +1361,7 @@ document.addEventListener("click", async (event) => {
   if (target.classList.contains("nav-item")) { switchView(target.dataset.view); return; }
   if (target.id === "fill-all") { $("#trade-quantity").value = state.form.sellContext.maxQuantity; updateSalePreview(); return; }
   const action = target.dataset.action;
+  if (action === "clear-security-input") { event.preventDefault(); clearSecurityInput(target.dataset.input); return; }
   if (action === "summary-filter") {
     const key = target.dataset.filter;
     if (["period", "style", "accountType"].includes(key)) {

@@ -7,7 +7,11 @@ const num = v => v == null ? "未評価" : Number(v).toLocaleString("ja-JP",{max
 const refs = v => String(v||"").split(/[,、\n]/).map(x=>x.trim()).filter(Boolean);
 const names = {swing:"スイング",midlong:"中長期"};
 const opt = (v,label=v) => '<option value="'+esc(v)+'">'+esc(label)+'</option>';
-const input = (id,label,type="text",extra="") => '<label>'+label+'<input id="j-'+id+'" type="'+type+'" '+extra+'></label>';
+const input = (id,label,type="text",extra="",clearable=false) => {
+  const field='<input id="j-'+id+'" type="'+type+'" '+extra+'>';
+  const control=clearable?'<span class="clearable-input">'+field+'<button type="button" class="clear-input-button" data-action="clear-security-input" data-input="j-'+id+'" aria-label="'+esc(label)+'の入力をクリア" title="入力をクリア"><span aria-hidden="true">×</span></button></span>':field;
+  return '<label>'+label+control+'</label>';
+};
 const area = (id,label) => '<label>'+label+'<textarea id="j-'+id+'" rows="3"></textarea></label>';
 const check = (id,label) => '<label class="j-check"><input id="j-'+id+'" type="checkbox">'+label+'</label>';
 const detail = (title,body,open=false) => '<details class="j-detail" '+(open?"open":"")+'><summary>'+title+'</summary><div class="j-detail-body">'+body+'</div></details>';
@@ -372,7 +376,7 @@ export function createJudgment(root,getUser,getSecurities) {
       '<div id="j-result" class="panel j-result"><p class="j-muted">銘柄を入力すると、ここに結論・価格戦略を表示します。</p></div>',
       '<p id="j-message" role="status" aria-live="polite"></p>',
       '<div class="panel j-inputs"><h2>銘柄を判断する</h2><div class="j-grid">',
-      input("symbol","銘柄名・銘柄コード","text",'list="j-securities" autocomplete="off" placeholder="例：7203 トヨタ自動車"'),
+      input("symbol","銘柄名・銘柄コード","text",'list="j-securities" autocomplete="off" placeholder="例：7203 トヨタ自動車"',true),
       '<datalist id="j-securities"></datalist>',
       input("entry","想定Entry価格（任意）","number",'min="0" step="any" inputmode="decimal"'),
       input("asof","分析基準日時","text",'placeholder="2026-09-11T16:00:00+09:00"'),

@@ -98,15 +98,16 @@
           </label>
 
           <label id="security-field" class="full">銘柄
-            <span class="security-input-wrap">
+            <span class="security-input-wrap clearable-input">
               <input id="security-query" class="keyboard-safe-input" autocomplete="off" placeholder="銘柄コードまたは銘柄名を入力">
+              <button type="button" class="clear-input-button" data-action="clear-security-input" data-input="security-query" aria-label="銘柄の入力をクリア" title="入力をクリア"><span aria-hidden="true">×</span></button>
               <span id="security-options" class="security-options hidden" role="listbox"></span>
             </span>
           </label>
           <div id="fixed-security" class="fixed-security full hidden"></div>
           <div id="manual-fields" class="manual-fields full hidden">
-            <label>銘柄コード<input id="manual-code" maxlength="8" placeholder="例：285A"></label>
-            <label>正式銘柄名<input id="manual-name" maxlength="80" placeholder="銘柄名を入力"></label>
+            <label>銘柄コード<span class="clearable-input"><input id="manual-code" maxlength="8" placeholder="例：285A"><button type="button" class="clear-input-button" data-action="clear-security-input" data-input="manual-code" aria-label="銘柄コードの入力をクリア" title="入力をクリア"><span aria-hidden="true">×</span></button></span></label>
+            <label>正式銘柄名<span class="clearable-input"><input id="manual-name" maxlength="80" placeholder="銘柄名を入力"><button type="button" class="clear-input-button" data-action="clear-security-input" data-input="manual-name" aria-label="正式銘柄名の入力をクリア" title="入力をクリア"><span aria-hidden="true">×</span></button></span></label>
           </div>
 
           <label><span id="price-label">取得価格</span><input id="trade-price" inputmode="decimal" type="number" min="0.01" step="any" placeholder="0" required></label>
